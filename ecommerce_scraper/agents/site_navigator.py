@@ -1,0 +1,212 @@
+"""Site navigation agent specialized in navigating different ecommerce platforms."""
+
+from typing import List, Optional
+from crewai import Agent
+
+
+class SiteNavigatorAgent:
+    """Agent specialized in navigating ecommerce sites and handling site-specific challenges."""
+    
+    def __init__(self, tools: List):
+        """Initialize the site navigator agent with required tools."""
+        
+        self.agent = Agent(
+            role="Ecommerce Site Navigation Expert",
+            goal="""
+            Navigate ecommerce websites efficiently and handle site-specific challenges
+            such as cookie banners, age verification, CAPTCHAs, and complex navigation structures.
+            """,
+            backstory="""
+            You are a web navigation specialist with extensive experience across major ecommerce
+            platforms including Amazon, eBay, Shopify stores, and custom ecommerce sites.
+            You understand the common patterns and challenges in ecommerce site navigation.
+            
+            Your expertise includes:
+            - Handling cookie consent banners and privacy notices
+            - Navigating complex category structures and filters
+            - Dealing with age verification and location-based restrictions
+            - Managing shopping cart and wishlist interactions
+            - Handling search functionality across different platforms
+            - Recognizing and bypassing common anti-bot measures
+            - Understanding mobile vs desktop layout differences
+            """,
+            verbose=True,
+            allow_delegation=False,
+            tools=tools,
+            max_iter=3,
+            memory=True
+        )
+    
+    def create_navigation_task(self, target_url: str, navigation_goal: str):
+        """Create a task for navigating to a specific page or section."""
+        from crewai import Task
+        
+        task_description = f"""
+        Navigate to the target URL and accomplish the navigation goal.
+        
+        Target URL: {target_url}
+        Navigation Goal: {navigation_goal}
+        
+        Your task is to:
+        1. Navigate to the target URL
+        2. Handle any initial popups, banners, or consent requests
+        3. Accomplish the specific navigation goal
+        4. Verify that you've reached the correct page/section
+        5. Report on any obstacles encountered and how they were resolved
+        
+        Common challenges to watch for:
+        - Cookie consent banners (accept them)
+        - Age verification prompts (handle appropriately)
+        - Location/country selection dialogs
+        - Newsletter signup popups (dismiss them)
+        - Loading delays and dynamic content
+        - Mobile vs desktop layout differences
+        
+        Be patient and allow pages to fully load before taking actions.
+        """
+        
+        return Task(
+            description=task_description,
+            agent=self.agent,
+            expected_output="""
+            A report confirming successful navigation with details about:
+            - Whether the navigation goal was achieved
+            - Any obstacles encountered and how they were resolved
+            - Current page status and readiness for further actions
+            - Any warnings or notes about the site's behavior
+            """
+        )
+    
+    def create_search_task(self, site_url: str, search_query: str):
+        """Create a task for performing a search on an ecommerce site."""
+        from crewai import Task
+        
+        task_description = f"""
+        Navigate to the ecommerce site and perform a product search.
+
+        Site URL: {site_url}
+        Search Query: "{search_query}"
+
+        CRITICAL: You MUST use the Web Automation Tool (Stagehand) to actually navigate and interact with the real website.
+        DO NOT generate fake responses. Only report what you actually observe on the live website.
+
+        Your task is to:
+        1. Use the Web Automation Tool to navigate to the site and handle any initial popups/banners
+        2. Use the Web Automation Tool to locate the search functionality (search box, search button)
+        3. Use the Web Automation Tool to enter the search query and execute the search
+        4. Wait for search results to load completely
+        5. Verify that relevant search results are displayed
+        6. Report on the search results page structure and content
+
+        Search strategies to try:
+        - ALWAYS use the Web Automation Tool for navigation and interaction
+        - Look for main search box (usually in header)
+        - Try category-specific search if main search isn't obvious
+        - Handle search suggestions/autocomplete if they appear
+        - Wait for dynamic loading of results
+        - Check if filters or sorting options are available
+        - Only report what you actually see on the real website
+
+        If the search fails, try alternative approaches or report the issue.
+        """
+        
+        return Task(
+            description=task_description,
+            agent=self.agent,
+            expected_output="""
+            A detailed report about the search process including:
+            - Whether the search was successful
+            - Number of results found (if visible)
+            - Structure of the search results page
+            - Available filters, sorting options, or pagination
+            - Any issues encountered during the search process
+            """
+        )
+    
+    def create_category_navigation_task(self, site_url: str, category_path: str):
+        """Create a task for navigating to a specific product category."""
+        from crewai import Task
+        
+        task_description = f"""
+        Navigate to a specific product category on the ecommerce site.
+        
+        Site URL: {site_url}
+        Category Path: {category_path}
+        
+        Your task is to:
+        1. Navigate to the site and handle initial popups/banners
+        2. Locate the main navigation menu or category structure
+        3. Navigate through the category hierarchy to reach the target category
+        4. Verify that you've reached the correct category page
+        5. Report on the category page structure and available products
+        
+        Navigation strategies:
+        - Look for main navigation menu (usually in header)
+        - Check for mega menus or dropdown categories
+        - Try breadcrumb navigation if available
+        - Look for category filters or subcategory options
+        - Handle any category-specific popups or promotions
+        
+        Category path examples:
+        - "Electronics > Computers > Laptops"
+        - "Clothing > Men > Shoes"
+        - "Home & Garden > Furniture"
+        """
+        
+        return Task(
+            description=task_description,
+            agent=self.agent,
+            expected_output="""
+            A report about the category navigation including:
+            - Whether the target category was reached successfully
+            - Structure of the category page (grid, list, filters available)
+            - Number of products visible in the category
+            - Available subcategories or filters
+            - Any navigation challenges encountered
+            """
+        )
+    
+    def create_product_page_access_task(self, product_url: str):
+        """Create a task for accessing a specific product page."""
+        from crewai import Task
+        
+        task_description = f"""
+        Navigate to a specific product page and ensure it's fully loaded.
+        
+        Product URL: {product_url}
+        
+        Your task is to:
+        1. Navigate directly to the product URL
+        2. Handle any popups, banners, or access restrictions
+        3. Wait for the product page to fully load (including images and dynamic content)
+        4. Verify that this is indeed a product page with product information
+        5. Check for any access restrictions or errors
+        6. Report on the page readiness for data extraction
+        
+        Things to watch for:
+        - Product page loading completely (images, prices, descriptions)
+        - Variant selection options (size, color, etc.)
+        - Dynamic pricing or availability updates
+        - Related products or recommendations loading
+        - Any login requirements or access restrictions
+        - Mobile vs desktop layout differences
+        
+        If the page doesn't load properly, try refreshing or report the issue.
+        """
+        
+        return Task(
+            description=task_description,
+            agent=self.agent,
+            expected_output="""
+            A status report about the product page including:
+            - Whether the page loaded successfully
+            - Confirmation that it's a valid product page
+            - Readiness for data extraction (all elements loaded)
+            - Any access restrictions or errors encountered
+            - Notes about the page structure and layout
+            """
+        )
+    
+    def get_agent(self) -> Agent:
+        """Get the CrewAI agent instance."""
+        return self.agent

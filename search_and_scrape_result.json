@@ -1,0 +1,19 @@
+{
+  "success": true,
+  "search_query": "bread",
+  "site_url": "https://groceries.asda.com/",
+  "max_products": 5,
+  "data": {
+    "search_query": "bread",
+    "site_url": "https://groceries.asda.com/",
+    "products": [],
+    "summary": {
+      "total_products_found": 0,
+      "available_products": 0,
+      "limited_stock_products": 0,
+      "warnings": [
+        "Failed to access the website for scraping due to missing model_api_key for the Web Automation Tool."
+      ]
+    }
+  }
+}
