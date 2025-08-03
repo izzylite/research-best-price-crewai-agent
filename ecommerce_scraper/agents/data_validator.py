@@ -5,33 +5,34 @@ from crewai import Agent, LLM
 
 
 class DataValidatorAgent:
-    """Agent specialized in validating, cleaning, and standardizing extracted product data."""
-    
+    """Agent specialized in validating, cleaning, and standardizing extracted product data using StandardizedProduct schema."""
+
     def __init__(self, tools: List, llm: Optional[LLM] = None):
         """Initialize the data validator agent with required tools."""
 
         agent_config = {
-            "role": "Product Data Quality Specialist",
+            "role": "StandardizedProduct Data Validation Expert",
             "goal": """
-            Validate, clean, and standardize extracted product data to ensure
-            high quality, consistency, and compliance with the defined schema.
+            Validate, clean, and standardize extracted product data to ensure compliance with
+            the StandardizedProduct schema and maintain high quality across all UK retail vendors.
             """,
             "backstory": """
-            You are a data quality expert with extensive experience in ecommerce data
-            standardization and validation. You understand the common issues that arise
-            when extracting data from different websites and know how to clean and
-            normalize data for consistency.
+            You are a data quality specialist with extensive experience in multi-vendor ecommerce
+            data validation and StandardizedProduct schema compliance. You understand the specific
+            data quality challenges when extracting from UK retail platforms.
 
-            Your expertise includes:
-            - Data type validation and conversion
-            - Price format standardization across currencies
-            - URL validation and resolution
-            - Text cleaning and normalization
-            - Data completeness assessment
-            - Duplicate detection and removal
-            - Schema compliance validation
-            - Data quality scoring and reporting
-            - Handling missing or malformed data
+            Your enhanced expertise includes:
+            - StandardizedProduct schema validation and compliance
+            - UK retail data standardization (GBP pricing, weights, etc.)
+            - Multi-vendor data consistency across ASDA, Tesco, Waitrose, etc.
+            - Price format validation and GBP currency standardization
+            - Product weight validation and unit standardization
+            - URL validation and image link verification
+            - Text cleaning and normalization for UK product data
+            - Category standardization across different vendor taxonomies
+            - Duplicate detection across multiple vendors
+            - Data completeness assessment for required schema fields
+            - Quality scoring and vendor-specific data reporting
             """,
             "verbose": True,
             "allow_delegation": False,
@@ -44,7 +45,75 @@ class DataValidatorAgent:
             agent_config["llm"] = llm
 
         self.agent = Agent(**agent_config)
-    
+
+    def create_standardized_validation_task(self, vendor: str, category: str, session_id: str):
+        """Create a task for validating extracted data against StandardizedProduct schema."""
+        from crewai import Task
+
+        task_description = f"""
+        Validate and clean extracted product data to ensure StandardizedProduct schema compliance.
+
+        Vendor: {vendor}
+        Category: {category}
+        Session ID: {session_id}
+
+        VALIDATION REQUIREMENTS:
+        Validate each product against the StandardizedProduct schema:
+
+        REQUIRED FIELDS (must be present and valid):
+        - name: Non-empty string, min 1 character
+        - description: Non-empty string, min 1 character
+        - price.current: Valid float/number > 0
+        - price.currency: Must be "GBP" for UK retailers
+        - image_url: Valid URL format
+        - category: Must match provided category "{category}"
+        - vendor: Must match provided vendor "{vendor}"
+        - scraped_at: Valid ISO timestamp
+
+        OPTIONAL FIELDS (validate if present):
+        - price.original: Valid float/number > price.current
+        - price.discount_percentage: Valid percentage (0-100)
+        - weight: Valid weight string with units
+
+        VALIDATION ACTIONS:
+        1. Check all required fields are present and valid
+        2. Validate data types and formats
+        3. Standardize price formats to GBP
+        4. Clean and normalize text fields
+        5. Validate URL formats for images
+        6. Remove products with missing required fields
+        7. Calculate discount percentages if original price exists
+        8. Standardize weight units and formats
+        9. Ensure category and vendor consistency
+        10. Generate validation report with statistics
+
+        CLEANING RULES:
+        - Trim whitespace from all text fields
+        - Normalize price formats (remove currency symbols, convert to float)
+        - Validate and fix image URLs
+        - Standardize weight units (g, kg, ml, l)
+        - Remove HTML tags from descriptions
+        - Ensure consistent category naming
+        """
+
+        return Task(
+            description=task_description,
+            agent=self.agent,
+            expected_output="""
+            A validation result containing:
+            - validated_products: Array of clean StandardizedProduct objects
+            - validation_summary: {{
+                "total_input": number of input products,
+                "valid_products": number of products that passed validation,
+                "invalid_products": number of products removed,
+                "validation_errors": list of validation issues found,
+                "vendor": vendor name,
+                "category": category name,
+                "session_id": session identifier
+            }}
+            """
+        )
+
     def create_validation_task(self, validation_level: str = "comprehensive"):
         """Create a task for validating extracted product data."""
         from crewai import Task

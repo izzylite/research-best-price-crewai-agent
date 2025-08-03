@@ -1,33 +1,50 @@
 """Main product scraper agent that coordinates the scraping process."""
 
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from crewai import Agent, LLM
+
+from ..state.state_manager import StateManager
+from ..progress.progress_tracker import ProgressTracker
+from ..config.sites import get_site_config_by_vendor, SiteConfig
 
 
 class ProductScraperAgent:
     """Main agent that coordinates product scraping across different ecommerce sites."""
-    
-    def __init__(self, tools: List, llm: Optional[LLM] = None):
-        """Initialize the product scraper agent with required tools."""
+
+    def __init__(self,
+                 tools: List,
+                 llm: Optional[LLM] = None,
+                 state_manager: Optional[StateManager] = None,
+                 progress_tracker: Optional[ProgressTracker] = None):
+        """Initialize the product scraper agent with required tools and enhanced capabilities."""
+
+        # Store enhanced components
+        self.state_manager = state_manager
+        self.progress_tracker = progress_tracker
 
         agent_config = {
-            "role": "Product Scraping Coordinator",
+            "role": "Multi-Vendor Product Scraping Coordinator",
             "goal": """
-            Coordinate the extraction of comprehensive product information from ecommerce websites.
-            Ensure data quality, handle errors gracefully, and maintain respectful scraping practices.
+            Coordinate the extraction of comprehensive product information from multiple ecommerce vendors.
+            Manage state persistence, progress tracking, and ensure data quality across different platforms.
+            Support batch processing and resume functionality for large-scale operations.
             """,
             "backstory": """
-            You are an expert ecommerce data analyst with deep knowledge of online retail platforms.
-            You understand the structure of product pages across different sites and can adapt your
-            approach based on the specific ecommerce platform. You prioritize data accuracy and
-            completeness while respecting website terms of service and rate limits.
+            You are an expert ecommerce data analyst with deep knowledge of online retail platforms
+            and multi-vendor scraping operations. You understand the structure of product pages across
+            different sites and can adapt your approach based on vendor-specific configurations.
 
-            Your expertise includes:
-            - Navigating complex ecommerce site structures
-            - Identifying and extracting product information
-            - Handling dynamic content and JavaScript-heavy sites
-            - Dealing with anti-bot measures and CAPTCHAs
-            - Ensuring data quality and consistency
+            Your enhanced expertise includes:
+            - Multi-vendor product data extraction (UK retailers: ASDA, Tesco, Waitrose, etc.)
+            - State management and session persistence across interruptions
+            - Progress tracking and performance monitoring
+            - Batch processing coordination with worker management
+            - Standardized data schema compliance across all vendors
+            - Site-specific configuration and adaptation
+            - Respectful scraping with vendor-specific rate limits
+            - Error handling and recovery with resume capabilities
+            - Data standardization using the StandardizedProduct schema
+            - Integration with progress tracking and state management systems
             """,
             "verbose": True,
             "allow_delegation": True,
@@ -40,7 +57,80 @@ class ProductScraperAgent:
             agent_config["llm"] = llm
 
         self.agent = Agent(**agent_config)
-    
+
+    def create_multi_vendor_scraping_task(self,
+                                        vendor: str,
+                                        category: str,
+                                        session_id: str,
+                                        max_pages: Optional[int] = None):
+        """Create a task for scraping products from a specific vendor and category."""
+        from crewai import Task
+
+        # Get vendor-specific configuration
+        site_config = get_site_config_by_vendor(vendor)
+        if not site_config:
+            raise ValueError(f"No configuration found for vendor: {vendor}")
+
+        task_description = f"""
+        Scrape products from {vendor} in the {category} category using standardized data extraction.
+
+        Vendor: {vendor}
+        Category: {category}
+        Session ID: {session_id}
+        Max Pages: {max_pages or 'unlimited'}
+        Base URL: {site_config.base_url}
+
+        CRITICAL REQUIREMENTS:
+        1. Use the Web Automation Tool (Stagehand) to navigate the real website
+        2. Extract data using the StandardizedProduct schema format
+        3. Report progress to the progress tracker if available
+        4. Handle vendor-specific navigation patterns and anti-bot measures
+        5. Respect rate limits: {site_config.delay_between_requests} seconds between requests
+        6. Use vendor-specific selectors and extraction patterns
+
+        Data must be extracted in this exact StandardizedProduct format:
+        {{
+            "name": "Product title/name",
+            "description": "Product description",
+            "price": {{
+                "current": 10.99,
+                "currency": "GBP",
+                "original": 15.99,
+                "discount_percentage": 33.3
+            }},
+            "image_url": "Primary product image URL",
+            "category": "{category}",
+            "vendor": "{vendor}",
+            "weight": "Product weight if available",
+            "scraped_at": "ISO timestamp"
+        }}
+
+        Handle pagination by:
+        1. Starting from the category page
+        2. Extracting products from current page
+        3. Navigating to next page if available and within max_pages limit
+        4. Continuing until no more pages or max_pages reached
+        5. Saving state after each page for resume capability
+        """
+
+        return Task(
+            description=task_description,
+            agent=self.agent,
+            expected_output="""
+            A JSON object containing:
+            - products: Array of StandardizedProduct objects
+            - metadata: {{
+                "vendor": vendor name,
+                "category": category name,
+                "session_id": session ID,
+                "pages_processed": number of pages scraped,
+                "total_products": total products extracted,
+                "processing_time": time taken in seconds,
+                "errors": any errors encountered
+            }}
+            """
+        )
+
     def create_scraping_task(self, product_url: str, site_type: Optional[str] = None):
         """Create a task for scraping a specific product."""
         from crewai import Task
@@ -173,6 +263,21 @@ class ProductScraperAgent:
             """
         )
     
+    def update_progress(self, vendor: str, category: str, products_scraped: int, pages_processed: int):
+        """Update progress tracking if available."""
+        if self.progress_tracker:
+            self.progress_tracker.update_progress(vendor, category, pages_processed, products_scraped)
+
+    def get_vendor_config(self, vendor: str) -> Optional[SiteConfig]:
+        """Get site configuration for a specific vendor."""
+        return get_site_config_by_vendor(vendor)
+
+    def create_session(self) -> Optional[str]:
+        """Create a new scraping session if state manager is available."""
+        if self.state_manager:
+            return self.state_manager.create_session()
+        return None
+
     def get_agent(self) -> Agent:
         """Get the CrewAI agent instance."""
         return self.agent

@@ -48,7 +48,7 @@ class ProductDataValidator(BaseTool):
             # Try to create a Product instance to validate
             try:
                 product = Product(**cleaned_data)
-                return json.dumps(product.dict(), indent=2, default=str)
+                return json.dumps(product.model_dump(), indent=2, default=str)
             except ValidationError as e:
                 # Return cleaned data even if validation fails, with error info
                 return json.dumps({

@@ -24,10 +24,10 @@ logger = logging.getLogger(__name__)
 openai_key = os.getenv("OPENAI_API_KEY")
 if openai_key:
     os.environ["OPENAI_API_KEY"] = openai_key
-    logger.info(f"✅ OpenAI API key loaded: {openai_key[:20]}...")
+    logger.info(f"OpenAI API key loaded: {openai_key[:20]}...")
 else:
-    logger.error("❌ OpenAI API key not found in environment")
-    print("❌ OpenAI API key not found in environment")
+    logger.error("OpenAI API key not found in environment")
+    print("OpenAI API key not found in environment")
 
 from rich.console import Console
 from rich.panel import Panel
@@ -72,7 +72,7 @@ def run_test():
     """Run the test suite."""
     console.print("[bold blue]Running test suite...[/bold blue]")
     import subprocess
-    result = subprocess.run([sys.executable, "test_ecommerce_simple.py"], 
+    result = subprocess.run([sys.executable, "test_scraping.py"],
                           capture_output=True, text=True)
     
     if result.returncode == 0:

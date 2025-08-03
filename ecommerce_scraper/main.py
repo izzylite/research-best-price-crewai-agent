@@ -3,6 +3,7 @@
 import json
 import os
 import logging
+from datetime import datetime
 from typing import List, Optional, Dict, Any, Union
 
 # Load settings first to get API keys
@@ -26,7 +27,7 @@ if settings.openai_api_key:
     os.environ["MODEL_API_KEY"] = settings.openai_api_key
     # ADDITIONAL: Set STAGEHAND_MODEL_API_KEY as backup
     os.environ["STAGEHAND_MODEL_API_KEY"] = settings.openai_api_key
-    logger.info(f"🔑 Set API keys for Stagehand: {settings.openai_api_key[:20]}...")
+    logger.info(f"Set API keys for Stagehand: {settings.openai_api_key[:20]}...")
 else:
     logger.error("OpenAI API key is required but not found in settings")
     raise ValueError("OpenAI API key is required but not found in settings")
@@ -43,8 +44,12 @@ from .agents.product_scraper import ProductScraperAgent
 from .agents.site_navigator import SiteNavigatorAgent
 from .agents.data_extractor import DataExtractorAgent
 from .agents.data_validator import DataValidatorAgent
-from .config.sites import get_site_config, detect_site_type, SiteType
+from .config.sites import get_site_config, detect_site_type, SiteType, get_all_supported_vendors
 from .schemas.product import Product
+from .schemas.standardized_product import StandardizedProduct
+from .state.state_manager import StateManager
+from .progress.progress_tracker import ProgressTracker
+from .batch.batch_processor import BatchProcessor
 from crewai_tools import StagehandTool
 from stagehand.schemas import AvailableModel
 from .tools.data_tools import ProductDataValidator, PriceExtractor, ImageExtractor
@@ -54,10 +59,18 @@ from .tools.stagehand_tool import EcommerceStagehandTool
 class EcommerceScraper:
     """Main ecommerce scraper that coordinates agents to extract product data."""
     
-    def __init__(self, verbose: bool = True):
-        """Initialize the ecommerce scraper."""
+    def __init__(self,
+                 verbose: bool = True,
+                 enable_state_management: bool = True,
+                 enable_progress_tracking: bool = True):
+        """Initialize the enhanced ecommerce scraper with multi-vendor capabilities."""
         self.console = Console()
         self.verbose = verbose
+
+        # Initialize enhanced components
+        self.state_manager = StateManager() if enable_state_management else None
+        self.progress_tracker = ProgressTracker(self.state_manager) if enable_progress_tracking and self.state_manager else None
+        self.batch_processor = None  # Will be initialized when needed
 
         # Configure LLM for CrewAI agents
         self.llm = LLM(
@@ -80,22 +93,35 @@ class EcommerceScraper:
         }
         self.stagehand_tool = None
 
-        # Initialize agents with role-specific tools and LLM
+        # Initialize enhanced agents with role-specific tools and enhanced capabilities
         # Note: StagehandTool will be added dynamically when needed
 
-        # ProductScraperAgent: Coordinator - needs ProductDataValidator
+        # ProductScraperAgent: Multi-vendor coordinator with state management
         product_scraper_tools = [ProductDataValidator()]
-        self.product_scraper = ProductScraperAgent(tools=product_scraper_tools, llm=self.llm)
+        self.product_scraper = ProductScraperAgent(
+            tools=product_scraper_tools,
+            llm=self.llm,
+            state_manager=self.state_manager,
+            progress_tracker=self.progress_tracker
+        )
 
-        # SiteNavigatorAgent: Navigation - will get StagehandTool dynamically
+        # SiteNavigatorAgent: Multi-vendor navigation with site configurations
         site_navigator_tools = []
-        self.site_navigator = SiteNavigatorAgent(tools=site_navigator_tools, llm=self.llm)
+        self.site_navigator = SiteNavigatorAgent(
+            tools=site_navigator_tools,
+            llm=self.llm,
+            site_configs={}  # Will be populated with vendor configs
+        )
 
-        # DataExtractorAgent: Data extraction - needs specialized extractors
+        # DataExtractorAgent: Standardized extraction with vendor support
         data_extractor_tools = [PriceExtractor(), ImageExtractor()]
-        self.data_extractor = DataExtractorAgent(tools=data_extractor_tools, llm=self.llm)
+        self.data_extractor = DataExtractorAgent(
+            tools=data_extractor_tools,
+            llm=self.llm,
+            site_configs={}  # Will be populated with vendor configs
+        )
 
-        # DataValidatorAgent: Data validation - needs validation and price tools
+        # DataValidatorAgent: StandardizedProduct schema validation
         data_validator_tools = [ProductDataValidator(), PriceExtractor()]
         self.data_validator = DataValidatorAgent(tools=data_validator_tools, llm=self.llm)
 
@@ -103,6 +129,87 @@ class EcommerceScraper:
         """Create a StagehandTool instance with proper configuration."""
         # Use our custom EcommerceStagehandTool instead of the buggy CrewAI StagehandTool
         return EcommerceStagehandTool()
+
+    def scrape_vendor_category(self,
+                             vendor: str,
+                             category: str,
+                             max_pages: Optional[int] = None,
+                             session_id: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Scrape products from a specific vendor and category using enhanced multi-vendor workflow.
+
+        Args:
+            vendor: Vendor identifier (e.g., 'asda', 'tesco', 'waitrose')
+            category: Category to scrape (e.g., 'bread', 'electronics')
+            max_pages: Maximum number of pages to scrape (None for unlimited)
+            session_id: Optional session ID for state management
+
+        Returns:
+            Dictionary containing scraped products and metadata
+        """
+        try:
+            if self.verbose:
+                self.console.print(f"[bold blue]Starting multi-vendor scraping: {vendor} - {category}[/bold blue]")
+
+            # Create session if not provided
+            if not session_id and self.state_manager:
+                session_id = self.state_manager.create_session()
+
+            # Create StagehandTool instance
+            stagehand_tool = self._create_stagehand_tool()
+
+            # Add StagehandTool to agents that need it
+            self.site_navigator.get_agent().tools = [stagehand_tool]
+            self.data_extractor.get_agent().tools = [stagehand_tool, PriceExtractor(), ImageExtractor()]
+            self.product_scraper.get_agent().tools = [stagehand_tool, ProductDataValidator()]
+
+            # Create multi-vendor tasks
+            navigation_task = self.site_navigator.create_vendor_navigation_task(vendor, category, session_id)
+            extraction_task = self.data_extractor.create_standardized_extraction_task(vendor, category, session_id)
+            scraping_task = self.product_scraper.create_multi_vendor_scraping_task(vendor, category, session_id, max_pages)
+            validation_task = self.data_validator.create_standardized_validation_task(vendor, category, session_id)
+
+            # Create crew with all agents
+            crew = Crew(
+                agents=[
+                    self.site_navigator.get_agent(),
+                    self.data_extractor.get_agent(),
+                    self.product_scraper.get_agent(),
+                    self.data_validator.get_agent()
+                ],
+                tasks=[navigation_task, extraction_task, scraping_task, validation_task],
+                verbose=self.verbose,
+                memory=True
+            )
+
+            # Execute the crew
+            result = crew.kickoff()
+
+            if self.verbose:
+                self.console.print(f"[bold green]Multi-vendor scraping completed for {vendor} - {category}[/bold green]")
+
+            return {
+                "success": True,
+                "vendor": vendor,
+                "category": category,
+                "session_id": session_id,
+                "data": result,
+                "timestamp": datetime.now().isoformat()
+            }
+
+        except Exception as e:
+            error_msg = f"Multi-vendor scraping failed for {vendor} - {category}: {str(e)}"
+            if self.verbose:
+                self.console.print(f"[bold red]{error_msg}[/bold red]")
+
+            return {
+                "success": False,
+                "vendor": vendor,
+                "category": category,
+                "session_id": session_id,
+                "error": error_msg,
+                "data": None
+            }
 
     def scrape_product(self, product_url: str, site_type: Optional[str] = None) -> Dict[str, Any]:
         """

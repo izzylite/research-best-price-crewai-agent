@@ -211,12 +211,17 @@ class EcommerceStagehandTool(BaseTool):
                     return "Error: Stagehand page is not initialized. Please check the configuration."
 
                 try:
-                    print(f"🌐 Navigating to: {url}")
+                    print(f"Navigating to: {url}")
                     run_async_safely(stagehand.page.goto(url))
                     self._current_url = url
                     # Wait for page to load
-                    time.sleep(2)
-                    print("✅ Navigation completed")
+                    time.sleep(3)  # Increased wait time for better page loading
+                    print("Navigation completed")
+
+                    # If this is just a navigation request, return success
+                    if instruction and any(nav_word in instruction.lower() for nav_word in ['navigate', 'go to', 'visit', 'open']):
+                        return f"Successfully navigated to {url}"
+
                 except Exception as e:
                     return f"Error navigating to {url}: {str(e)}"
             
@@ -247,11 +252,11 @@ class EcommerceStagehandTool(BaseTool):
 
         for attempt in range(settings.max_retries):
             try:
-                self._logger.info(f"🔧 Executing {command_type} command (attempt {attempt + 1}): {instruction[:50]}...")
+                self._logger.info(f"Executing {command_type} command (attempt {attempt + 1}): {instruction[:50]}...")
 
                 if command_type == "act":
                     result = run_async_safely(stagehand.page.act(instruction))
-                    self._logger.info("✅ Action completed")
+                    self._logger.info("Action completed")
                     return f"Action completed: {result}"
 
                 elif command_type == "extract":
@@ -260,7 +265,7 @@ class EcommerceStagehandTool(BaseTool):
                     else:
                         result = run_async_safely(stagehand.page.extract(instruction))
 
-                    self._logger.info("✅ Data extracted")
+                    self._logger.info("Data extracted")
                     # Try to format as JSON if possible
                     try:
                         if isinstance(result, str):
@@ -277,7 +282,7 @@ class EcommerceStagehandTool(BaseTool):
                         result = run_async_safely(stagehand.page.observe(instruction, selector=selector))
                     else:
                         result = run_async_safely(stagehand.page.observe(instruction))
-                    self._logger.info("✅ Elements observed")
+                    self._logger.info("Elements observed")
 
                     # Format observe results for better readability
                     if isinstance(result, list) and result:
@@ -382,9 +387,9 @@ Return the data in a structured JSON format."""
         """Close the Stagehand session and cleanup resources."""
         if self._stagehand:
             try:
-                self._logger.info("🔄 Closing Browserbase session...")
+                self._logger.info("Closing Browserbase session...")
                 run_async_safely(self._stagehand.close())
-                self._logger.info("✅ Browserbase session closed successfully")
+                self._logger.info("Browserbase session closed successfully")
             except Exception as e:
                 self._logger.warning(f"⚠️ Warning: Error closing Stagehand session: {e}")
             finally:
@@ -392,9 +397,9 @@ Return the data in a structured JSON format."""
                 self._current_url = None
                 # Clear cache on session close
                 self._cache.clear()
-                self._logger.info("🧹 Cache cleared")
+                self._logger.info("Cache cleared")
         else:
-            self._logger.info("ℹ️ No active Stagehand session to close")
+            self._logger.info("No active Stagehand session to close")
 
     def __enter__(self):
         """Context manager entry."""
@@ -424,7 +429,7 @@ Return the data in a structured JSON format."""
     def clear_cache(self) -> None:
         """Manually clear the cache."""
         self._cache.clear()
-        self._logger.info("🧹 Cache manually cleared")
+        self._logger.info("Cache manually cleared")
 
     def get_cache_stats(self) -> Dict[str, Any]:
         """Get cache statistics."""

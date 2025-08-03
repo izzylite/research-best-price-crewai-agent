@@ -1,35 +1,46 @@
 """Data extraction agent specialized in extracting structured product information."""
 
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from crewai import Agent, LLM
+
+from ..config.sites import get_site_config_by_vendor, SiteConfig
 
 
 class DataExtractorAgent:
-    """Agent specialized in extracting structured product data from ecommerce pages."""
-    
-    def __init__(self, tools: List, llm: Optional[LLM] = None):
-        """Initialize the data extractor agent with required tools."""
+    """Agent specialized in extracting structured product data from ecommerce pages using StandardizedProduct schema."""
+
+    def __init__(self,
+                 tools: List,
+                 llm: Optional[LLM] = None,
+                 site_configs: Optional[Dict[str, SiteConfig]] = None):
+        """Initialize the data extractor agent with required tools and site configurations."""
+
+        # Store site configurations
+        self.site_configs = site_configs or {}
 
         agent_config = {
-            "role": "Product Data Extraction Specialist",
+            "role": "Multi-Vendor Product Data Extraction Specialist",
             "goal": """
-            Extract comprehensive and accurate product information from ecommerce pages,
-            ensuring all relevant data is captured in a structured format.
+            Extract comprehensive and accurate product information from multiple UK ecommerce vendors,
+            ensuring all data is captured in the StandardizedProduct schema format for consistency
+            across different retail platforms.
             """,
             "backstory": """
-            You are a data extraction expert with deep knowledge of ecommerce product structures
-            across different platforms. You understand how product information is typically
-            organized and can adapt your extraction strategies based on the site layout.
+            You are a multi-vendor data extraction expert with deep knowledge of UK retail platforms
+            and their specific product data structures. You understand how different vendors organize
+            product information and can adapt extraction strategies accordingly.
 
-            Your expertise includes:
-            - Identifying product titles, descriptions, and specifications
-            - Extracting pricing information including sales and discounts
-            - Capturing product images and media content
-            - Understanding product variants and options
-            - Extracting customer reviews and ratings
-            - Handling dynamic content and JavaScript-rendered data
-            - Recognizing structured data markup (JSON-LD, microdata)
-            - Dealing with different currency formats and international sites
+            Your enhanced expertise includes:
+            - StandardizedProduct schema compliance for all extractions
+            - UK retail platform product structures (ASDA, Tesco, Waitrose, etc.)
+            - Vendor-specific pricing formats and currency handling (GBP)
+            - Product weight extraction for grocery and retail items
+            - Category standardization across different vendor taxonomies
+            - Handling vendor-specific product variants and options
+            - Extracting product images with proper URL resolution
+            - Managing dynamic content and JavaScript-rendered data per vendor
+            - Recognizing vendor-specific structured data markup
+            - Dealing with UK-specific product information (weights, sizes, etc.)
             """,
             "verbose": True,
             "allow_delegation": False,
@@ -42,7 +53,73 @@ class DataExtractorAgent:
             agent_config["llm"] = llm
 
         self.agent = Agent(**agent_config)
-    
+
+    def create_standardized_extraction_task(self, vendor: str, category: str, session_id: str):
+        """Create a task for extracting products using the StandardizedProduct schema."""
+        from crewai import Task
+
+        # Get vendor-specific configuration
+        site_config = get_site_config_by_vendor(vendor)
+        if not site_config:
+            raise ValueError(f"No configuration found for vendor: {vendor}")
+
+        task_description = f"""
+        Extract product data from {vendor} using the StandardizedProduct schema format.
+
+        Vendor: {vendor}
+        Category: {category}
+        Session ID: {session_id}
+
+        CRITICAL: Extract data in this EXACT StandardizedProduct format:
+        {{
+            "name": "Product title/name (string, required, min 1 char)",
+            "description": "Product description (string, required, min 1 char)",
+            "price": {{
+                "current": 10.99,  // Current price as float
+                "currency": "GBP",  // Always GBP for UK retailers
+                "original": 15.99,  // Original price if on sale (optional)
+                "discount_percentage": 33.3  // Calculated discount % (optional)
+            }},
+            "image_url": "Primary product image URL (string, required)",
+            "category": "{category}",  // Use the provided category
+            "vendor": "{vendor}",      // Use the provided vendor
+            "weight": "Product weight if available (string, optional)",
+            "scraped_at": "ISO timestamp (auto-generated)"
+        }}
+
+        EXTRACTION REQUIREMENTS:
+        1. Extract ALL products visible on the current page
+        2. Use vendor-specific selectors and patterns when available
+        3. Ensure all required fields are populated
+        4. Handle missing data gracefully (skip products with missing required fields)
+        5. Extract accurate pricing information in GBP
+        6. Get the primary/main product image URL
+        7. Clean and normalize product names and descriptions
+        8. Extract weight information for grocery items when available
+
+        VENDOR-SPECIFIC CONSIDERATIONS:
+        - Respect {vendor}'s specific HTML structure and CSS selectors
+        - Handle {vendor}'s specific pricing display formats
+        - Extract {vendor}'s specific product information layout
+        - Use appropriate delays between extractions
+        """
+
+        return Task(
+            description=task_description,
+            agent=self.agent,
+            expected_output="""
+            A JSON array of StandardizedProduct objects, each containing:
+            - name: Product title (required)
+            - description: Product description (required)
+            - price: Pricing object with current, currency, and optional original/discount
+            - image_url: Primary product image URL (required)
+            - category: Product category (required)
+            - vendor: Source vendor (required)
+            - weight: Product weight if available (optional)
+            - scraped_at: ISO timestamp (auto-generated)
+            """
+        )
+
     def create_basic_extraction_task(self, extraction_focus: str = "complete"):
         """Create a task for basic product data extraction."""
         from crewai import Task

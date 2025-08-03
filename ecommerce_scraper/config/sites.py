@@ -52,6 +52,77 @@ class SiteConfig:
 
 # Site configurations
 SITE_CONFIGS = {
+    # UK Retail Sites
+    "asda": SiteConfig(
+        name="ASDA",
+        site_type=SiteType.GENERIC,
+        base_url="https://www.asda.com",
+        search_url_pattern="https://www.asda.com/search/{query}",
+        requires_cookie_consent=True,
+        has_location_selection=True,
+        delay_between_requests=3,
+        selectors={
+            "search_box": "[data-testid='search-input']",
+            "search_button": "[data-testid='search-button']",
+            "product_title": "h1[data-testid='product-title']",
+            "price_current": "[data-testid='price-current']",
+            "price_original": "[data-testid='price-was']",
+            "availability": "[data-testid='availability']",
+            "product_images": "[data-testid='product-image']",
+            "description": "[data-testid='product-description']",
+            "category_nav": "[data-testid='category-navigation']",
+        },
+        navigation_instructions={
+            "handle_popups": "Accept GDPR cookie consent, dismiss location prompts and promotional banners",
+            "search_strategy": "Use main search in header, handle autocomplete suggestions",
+            "category_discovery": "Navigate through main menu and category pages",
+            "product_access": "Wait for dynamic content to load, handle lazy-loaded images",
+        },
+        extraction_instructions={
+            "title": "Extract clean product title without promotional text",
+            "price": "Handle £ symbol, extract current and was prices",
+            "availability": "Check stock status and delivery information",
+            "images": "Extract high-resolution product images",
+            "category": "Extract from breadcrumb navigation",
+            "weight": "Look for weight/size information in product details",
+        }
+    ),
+
+    "costco": SiteConfig(
+        name="Costco UK",
+        site_type=SiteType.GENERIC,
+        base_url="https://www.costco.com",
+        search_url_pattern="https://www.costco.com/CatalogSearch?keyword={query}",
+        requires_cookie_consent=True,
+        has_location_selection=True,
+        delay_between_requests=4,  # Slower for wholesale site
+        selectors={
+            "search_box": "#search-field",
+            "search_button": "#search-button",
+            "product_title": ".product-title",
+            "price_current": ".price-current",
+            "price_member": ".member-price",
+            "availability": ".availability-msg",
+            "product_images": ".product-image-main",
+            "description": ".product-description",
+            "bulk_info": ".bulk-pricing",
+        },
+        navigation_instructions={
+            "handle_popups": "Handle membership prompts, cookie consent, and location selection",
+            "search_strategy": "Use main search, may require membership for full access",
+            "category_discovery": "Navigate warehouse-style category structure",
+            "membership_handling": "Note membership requirements for pricing",
+        },
+        extraction_instructions={
+            "title": "Extract product title, include bulk/case information",
+            "price": "Extract member vs non-member pricing, handle bulk pricing",
+            "availability": "Check warehouse availability and shipping options",
+            "images": "Extract product images, handle zoom functionality",
+            "bulk_details": "Extract case/bulk quantity information",
+            "weight": "Extract package weight and dimensions",
+        }
+    ),
+
     SiteType.AMAZON: SiteConfig(
         name="Amazon",
         site_type=SiteType.AMAZON,
@@ -87,7 +158,112 @@ SITE_CONFIGS = {
             "variants": "Look for size, color, and style options",
         }
     ),
-    
+
+    "waitrose": SiteConfig(
+        name="Waitrose",
+        site_type=SiteType.GENERIC,
+        base_url="https://www.waitrose.com",
+        search_url_pattern="https://www.waitrose.com/ecom/shop/search?&searchTerm={query}",
+        requires_cookie_consent=True,
+        has_location_selection=True,
+        delay_between_requests=3,
+        selectors={
+            "search_box": "[data-test='header-search-input']",
+            "search_button": "[data-test='header-search-button']",
+            "product_title": "[data-test='product-title']",
+            "price_current": "[data-test='product-price']",
+            "price_per_unit": "[data-test='price-per-unit']",
+            "availability": "[data-test='product-availability']",
+            "product_images": "[data-test='product-image']",
+            "description": "[data-test='product-description']",
+            "category_nav": "[data-test='category-menu']",
+        },
+        navigation_instructions={
+            "handle_popups": "Accept cookie consent, handle postcode entry for delivery",
+            "search_strategy": "Use header search, handle product suggestions",
+            "category_discovery": "Navigate through department menu structure",
+            "location_handling": "May require postcode for full product availability",
+        },
+        extraction_instructions={
+            "title": "Extract product name, include brand information",
+            "price": "Handle £ pricing, extract per-unit pricing where available",
+            "availability": "Check delivery availability for location",
+            "images": "Extract high-quality product images",
+            "category": "Extract from navigation breadcrumbs",
+            "weight": "Extract weight/volume from product details",
+        }
+    ),
+
+    "tesco": SiteConfig(
+        name="Tesco",
+        site_type=SiteType.GENERIC,
+        base_url="https://www.tesco.com/groceries/en-GB",
+        search_url_pattern="https://www.tesco.com/groceries/en-GB/search?query={query}",
+        requires_cookie_consent=True,
+        has_location_selection=True,
+        delay_between_requests=3,
+        selectors={
+            "search_box": "[data-testid='search-input']",
+            "search_button": "[data-testid='search-button']",
+            "product_title": "[data-testid='product-title']",
+            "price_current": "[data-testid='price-current']",
+            "price_per_unit": "[data-testid='unit-price']",
+            "availability": "[data-testid='product-availability']",
+            "product_images": "[data-testid='product-image']",
+            "description": "[data-testid='product-description']",
+            "category_nav": "[data-testid='category-navigation']",
+        },
+        navigation_instructions={
+            "handle_popups": "Accept GDPR consent, handle postcode entry and store selection",
+            "search_strategy": "Use main search, handle autocomplete and filters",
+            "category_discovery": "Navigate through grocery department structure",
+            "store_selection": "May require store/postcode selection for pricing",
+        },
+        extraction_instructions={
+            "title": "Extract product title with brand and variety information",
+            "price": "Handle £ pricing, extract unit pricing (per kg, per 100g, etc.)",
+            "availability": "Check stock status and delivery slots",
+            "images": "Extract product images, handle multiple angles",
+            "category": "Extract from department and aisle information",
+            "weight": "Extract package size and weight information",
+        }
+    ),
+
+    "hamleys": SiteConfig(
+        name="Hamleys",
+        site_type=SiteType.GENERIC,
+        base_url="https://www.hamleys.com",
+        search_url_pattern="https://www.hamleys.com/search?q={query}",
+        requires_cookie_consent=True,
+        has_age_verification=True,
+        delay_between_requests=3,
+        selectors={
+            "search_box": "[data-testid='search-input']",
+            "search_button": "[data-testid='search-submit']",
+            "product_title": ".product-title",
+            "price_current": ".price-current",
+            "price_original": ".price-was",
+            "availability": ".stock-status",
+            "product_images": ".product-image",
+            "description": ".product-description",
+            "age_range": ".age-range",
+        },
+        navigation_instructions={
+            "handle_popups": "Accept cookies, handle age verification if required",
+            "search_strategy": "Use main search, handle toy category filters",
+            "category_discovery": "Navigate through age-based and toy-type categories",
+            "age_verification": "Handle age verification prompts for certain products",
+        },
+        extraction_instructions={
+            "title": "Extract toy name, include brand and series information",
+            "price": "Handle £ pricing, look for sale prices",
+            "availability": "Check stock status and delivery information",
+            "images": "Extract multiple product images and packaging shots",
+            "category": "Extract toy category and age range",
+            "age_range": "Extract recommended age range information",
+        }
+    ),
+
     SiteType.EBAY: SiteConfig(
         name="eBay",
         site_type=SiteType.EBAY,
@@ -120,7 +296,109 @@ SITE_CONFIGS = {
             "shipping": "Extract shipping costs and delivery estimates",
         }
     ),
-    
+
+    "mamasandpapas": SiteConfig(
+        name="Mamas & Papas",
+        site_type=SiteType.GENERIC,
+        base_url="https://www.mamasandpapas.com",
+        search_url_pattern="https://www.mamasandpapas.com/search?q={query}",
+        requires_cookie_consent=True,
+        delay_between_requests=3,
+        selectors={
+            "search_box": "[data-testid='search-input']",
+            "search_button": "[data-testid='search-button']",
+            "product_title": ".product-name",
+            "price_current": ".price-current",
+            "price_original": ".price-was",
+            "availability": ".availability-status",
+            "product_images": ".product-image",
+            "description": ".product-description",
+            "variants": ".product-variants",
+        },
+        navigation_instructions={
+            "handle_popups": "Accept GDPR consent, dismiss newsletter signup",
+            "search_strategy": "Use header search, handle product filters",
+            "category_discovery": "Navigate through baby/child age-based categories",
+            "variant_handling": "Handle size, color, and style variants",
+        },
+        extraction_instructions={
+            "title": "Extract product name with brand and model information",
+            "price": "Handle £ pricing, extract variant pricing",
+            "availability": "Check stock for different variants",
+            "images": "Extract multiple product images and lifestyle shots",
+            "category": "Extract product category and age suitability",
+            "variants": "Extract size, color, and style options with pricing",
+        }
+    ),
+
+    "selfridges": SiteConfig(
+        name="Selfridges",
+        site_type=SiteType.GENERIC,
+        base_url="https://www.selfridges.com/GB/en",
+        search_url_pattern="https://www.selfridges.com/GB/en/search/{query}",
+        requires_cookie_consent=True,
+        delay_between_requests=4,  # Slower for luxury site
+        selectors={
+            "search_box": "[data-testid='search-input']",
+            "search_button": "[data-testid='search-submit']",
+            "product_title": ".product-title",
+            "price_current": ".price-current",
+            "price_original": ".price-was",
+            "availability": ".stock-availability",
+            "product_images": ".product-image",
+            "description": ".product-description",
+            "brand": ".product-brand",
+        },
+        navigation_instructions={
+            "handle_popups": "Accept cookies, handle luxury brand protection measures",
+            "search_strategy": "Use main search, handle designer brand filters",
+            "category_discovery": "Navigate through luxury department structure",
+            "brand_protection": "Respect brand protection and anti-bot measures",
+        },
+        extraction_instructions={
+            "title": "Extract product name with designer brand prominence",
+            "price": "Handle £ pricing, may have high-value items",
+            "availability": "Check luxury item availability and delivery",
+            "images": "Extract high-quality product and lifestyle images",
+            "category": "Extract luxury category and designer brand",
+            "brand": "Extract designer brand information prominently",
+        }
+    ),
+
+    "next": SiteConfig(
+        name="Next",
+        site_type=SiteType.GENERIC,
+        base_url="https://www.next.co.uk",
+        search_url_pattern="https://www.next.co.uk/search?w={query}",
+        requires_cookie_consent=True,
+        delay_between_requests=3,
+        selectors={
+            "search_box": "[data-testid='search-input']",
+            "search_button": "[data-testid='search-button']",
+            "product_title": ".product-title",
+            "price_current": ".price-current",
+            "price_original": ".price-was",
+            "availability": ".stock-status",
+            "product_images": ".product-image",
+            "description": ".product-description",
+            "size_guide": ".size-guide",
+        },
+        navigation_instructions={
+            "handle_popups": "Accept GDPR consent, dismiss promotional banners",
+            "search_strategy": "Use header search, handle fashion filters",
+            "category_discovery": "Navigate through fashion and home categories",
+            "size_handling": "Handle extensive size and fit options",
+        },
+        extraction_instructions={
+            "title": "Extract fashion item name with style details",
+            "price": "Handle £ pricing, extract size-based pricing",
+            "availability": "Check size availability and stock levels",
+            "images": "Extract fashion images including model shots",
+            "category": "Extract fashion category and subcategory",
+            "sizes": "Extract available sizes and fit information",
+        }
+    ),
+
     SiteType.SHOPIFY: SiteConfig(
         name="Shopify Store",
         site_type=SiteType.SHOPIFY,
@@ -149,7 +427,75 @@ SITE_CONFIGS = {
             "inventory": "Check stock levels for different variants",
         }
     ),
-    
+
+    "primark": SiteConfig(
+        name="Primark",
+        site_type=SiteType.GENERIC,
+        base_url="https://www.primark.com/en-gb",
+        search_url_pattern="https://www.primark.com/en-gb/search?q={query}",
+        requires_cookie_consent=True,
+        delay_between_requests=3,
+        selectors={
+            "search_box": "[data-testid='search-input']",
+            "search_button": "[data-testid='search-submit']",
+            "product_title": ".product-title",
+            "price_current": ".price",
+            "availability": ".availability",
+            "product_images": ".product-image",
+            "description": ".product-description",
+            "store_availability": ".store-stock",
+        },
+        navigation_instructions={
+            "handle_popups": "Accept GDPR consent, handle store finder prompts",
+            "search_strategy": "Use main search, limited online catalog",
+            "category_discovery": "Navigate through fashion categories",
+            "store_focus": "Note focus on store availability over online sales",
+        },
+        extraction_instructions={
+            "title": "Extract fashion item name and style code",
+            "price": "Handle £ pricing, typically low-cost fashion",
+            "availability": "Check store availability rather than online stock",
+            "images": "Extract product images, may be limited online",
+            "category": "Extract fashion category and target demographic",
+            "store_info": "Extract store availability information",
+        }
+    ),
+
+    "thetoyshop": SiteConfig(
+        name="The Toy Shop",
+        site_type=SiteType.GENERIC,
+        base_url="https://www.thetoyshop.com",
+        search_url_pattern="https://www.thetoyshop.com/search?q={query}",
+        requires_cookie_consent=True,
+        has_age_verification=True,
+        delay_between_requests=3,
+        selectors={
+            "search_box": "[data-testid='search-input']",
+            "search_button": "[data-testid='search-button']",
+            "product_title": ".product-title",
+            "price_current": ".price-current",
+            "price_original": ".price-was",
+            "availability": ".stock-status",
+            "product_images": ".product-image",
+            "description": ".product-description",
+            "age_range": ".age-suitability",
+        },
+        navigation_instructions={
+            "handle_popups": "Accept cookies, handle age verification",
+            "search_strategy": "Use main search, handle toy category filters",
+            "category_discovery": "Navigate through toy categories and age ranges",
+            "seasonal_handling": "Handle seasonal toy availability",
+        },
+        extraction_instructions={
+            "title": "Extract toy name with brand and series information",
+            "price": "Handle £ pricing, look for promotional offers",
+            "availability": "Check toy availability and delivery options",
+            "images": "Extract toy images and packaging information",
+            "category": "Extract toy category and age appropriateness",
+            "age_range": "Extract recommended age range and safety information",
+        }
+    ),
+
     SiteType.GENERIC: SiteConfig(
         name="Generic Ecommerce",
         site_type=SiteType.GENERIC,
@@ -173,8 +519,30 @@ SITE_CONFIGS = {
 def get_site_config(url: str) -> SiteConfig:
     """Get site configuration based on URL."""
     url_lower = url.lower()
-    
-    if "amazon." in url_lower:
+
+    # UK Retail Sites
+    if "asda.com" in url_lower:
+        return SITE_CONFIGS["asda"]
+    elif "costco.com" in url_lower:
+        return SITE_CONFIGS["costco"]
+    elif "waitrose.com" in url_lower:
+        return SITE_CONFIGS["waitrose"]
+    elif "tesco.com" in url_lower:
+        return SITE_CONFIGS["tesco"]
+    elif "hamleys.com" in url_lower:
+        return SITE_CONFIGS["hamleys"]
+    elif "mamasandpapas.com" in url_lower:
+        return SITE_CONFIGS["mamasandpapas"]
+    elif "selfridges.com" in url_lower:
+        return SITE_CONFIGS["selfridges"]
+    elif "next.co.uk" in url_lower:
+        return SITE_CONFIGS["next"]
+    elif "primark.com" in url_lower:
+        return SITE_CONFIGS["primark"]
+    elif "thetoyshop.com" in url_lower:
+        return SITE_CONFIGS["thetoyshop"]
+    # International Sites
+    elif "amazon." in url_lower:
         return SITE_CONFIGS[SiteType.AMAZON]
     elif "ebay." in url_lower:
         return SITE_CONFIGS[SiteType.EBAY]
@@ -192,6 +560,54 @@ def get_site_config(url: str) -> SiteConfig:
         parsed = urlparse(url)
         config.base_url = f"{parsed.scheme}://{parsed.netloc}"
         return config
+
+
+def get_site_config_by_vendor(vendor_name: str) -> SiteConfig:
+    """Get site configuration by vendor name.
+
+    Args:
+        vendor_name: Vendor identifier (e.g., 'asda', 'tesco', 'amazon')
+
+    Returns:
+        SiteConfig for the vendor
+
+    Raises:
+        KeyError: If vendor is not supported
+    """
+    vendor_lower = vendor_name.lower()
+
+    # Direct lookup for UK retailers
+    if vendor_lower in SITE_CONFIGS:
+        return SITE_CONFIGS[vendor_lower]
+
+    # Handle legacy site types
+    site_type_mapping = {
+        "amazon": SiteType.AMAZON,
+        "ebay": SiteType.EBAY,
+        "shopify": SiteType.SHOPIFY,
+        "generic": SiteType.GENERIC
+    }
+
+    if vendor_lower in site_type_mapping:
+        return SITE_CONFIGS[site_type_mapping[vendor_lower]]
+
+    raise KeyError(f"Unsupported vendor: {vendor_name}")
+
+
+def get_supported_uk_vendors() -> List[str]:
+    """Get list of supported UK retail vendors."""
+    uk_vendors = [
+        "asda", "costco", "waitrose", "tesco", "hamleys",
+        "mamasandpapas", "selfridges", "next", "primark", "thetoyshop"
+    ]
+    return uk_vendors
+
+
+def get_all_supported_vendors() -> List[str]:
+    """Get list of all supported vendors including UK and international."""
+    uk_vendors = get_supported_uk_vendors()
+    international = ["amazon", "ebay", "shopify", "generic"]
+    return uk_vendors + international
 
 
 def detect_site_type(url: str) -> SiteType:

@@ -314,8 +314,50 @@ ecommerce_scraper/
 └── main.py              # Main scraper class
 
 examples/                # Usage examples
+├── stagehand_best_practices_example.py  # Best practices demo
+└── interactive_scraper.py               # Interactive mode
 tests/                   # Test suite
 ```
+
+## 🔐 Stagehand Best Practices
+
+This project implements comprehensive Stagehand best practices for production-ready scraping:
+
+### Security Features
+- **Variable Substitution**: Secure handling of sensitive data without exposing it to LLMs
+- **Environment Variable Management**: Secure configuration with validation
+- **Safe Logging**: Automatic masking of sensitive information in logs
+
+### Performance Optimizations
+- **Intelligent Caching**: Automatic caching of extract and observe operations
+- **Retry Logic**: Exponential backoff for failed operations
+- **Action Previewing**: Preview actions before execution to reduce costs
+
+### Usage with Best Practices
+```python
+from ecommerce_scraper.tools.stagehand_tool import EcommerceStagehandTool
+
+# Use context manager for automatic cleanup
+with EcommerceStagehandTool.create_with_context() as tool:
+    # Secure form interaction with variables
+    tool._run(
+        instruction="Type %email% in the email field",
+        command_type="act",
+        variables={"email": "secure@example.com"}
+    )
+
+    # Preview actions before executing
+    preview = tool.preview_action("Find the add to cart button")
+
+    # Extract with caching
+    product_data = tool._run(
+        instruction="Extract product title and price",
+        command_type="extract",
+        use_cache=True
+    )
+```
+
+📖 **See [STAGEHAND_BEST_PRACTICES.md](STAGEHAND_BEST_PRACTICES.md) for comprehensive documentation**
 
 ### Adding New Sites
 

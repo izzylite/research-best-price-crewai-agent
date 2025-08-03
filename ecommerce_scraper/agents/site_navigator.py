@@ -1,34 +1,45 @@
 """Site navigation agent specialized in navigating different ecommerce platforms."""
 
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from crewai import Agent, LLM
+
+from ..config.sites import get_site_config_by_vendor, SiteConfig
 
 
 class SiteNavigatorAgent:
     """Agent specialized in navigating ecommerce sites and handling site-specific challenges."""
-    
-    def __init__(self, tools: List, llm: Optional[LLM] = None):
-        """Initialize the site navigator agent with required tools."""
+
+    def __init__(self,
+                 tools: List,
+                 llm: Optional[LLM] = None,
+                 site_configs: Optional[Dict[str, SiteConfig]] = None):
+        """Initialize the site navigator agent with required tools and site configurations."""
+
+        # Store site configurations
+        self.site_configs = site_configs or {}
 
         agent_config = {
-            "role": "Ecommerce Site Navigation Expert",
+            "role": "Multi-Vendor Ecommerce Site Navigation Expert",
             "goal": """
-            Navigate ecommerce websites efficiently and handle site-specific challenges
-            such as cookie banners, age verification, CAPTCHAs, and complex navigation structures.
+            Navigate multiple UK ecommerce websites efficiently using vendor-specific configurations.
+            Handle site-specific challenges, cookie banners, age verification, and complex navigation
+            structures while maintaining optimal performance across different retail platforms.
             """,
             "backstory": """
-            You are a web navigation specialist with extensive experience across major ecommerce
-            platforms including Amazon, eBay, Shopify stores, and custom ecommerce sites.
-            You understand the common patterns and challenges in ecommerce site navigation.
+            You are a multi-vendor web navigation specialist with extensive experience across UK retail
+            platforms including ASDA, Tesco, Waitrose, Costco, Hamleys, and other major retailers.
+            You understand vendor-specific navigation patterns and can adapt to different site architectures.
 
-            Your expertise includes:
-            - Handling cookie consent banners and privacy notices
-            - Navigating complex category structures and filters
-            - Dealing with age verification and location-based restrictions
-            - Managing shopping cart and wishlist interactions
-            - Handling search functionality across different platforms
-            - Recognizing and bypassing common anti-bot measures
-            - Understanding mobile vs desktop layout differences
+            Your enhanced expertise includes:
+            - Vendor-specific cookie consent and GDPR compliance handling
+            - UK retail site navigation patterns and category structures
+            - Location-based delivery area selection for UK postcodes
+            - Age verification for restricted products (alcohol, etc.)
+            - Anti-bot evasion strategies tailored to each vendor
+            - Mobile vs desktop layout differences across UK retailers
+            - Site-specific search functionality and filtering systems
+            - Handling vendor-specific popups and promotional banners
+            - Managing rate limits and respectful crawling per vendor
             """,
             "verbose": True,
             "allow_delegation": False,
@@ -41,7 +52,57 @@ class SiteNavigatorAgent:
             agent_config["llm"] = llm
 
         self.agent = Agent(**agent_config)
-    
+
+    def create_vendor_navigation_task(self, vendor: str, category: str, session_id: str):
+        """Create a task for navigating to a specific vendor's category page."""
+        from crewai import Task
+
+        # Get vendor-specific configuration
+        site_config = get_site_config_by_vendor(vendor)
+        if not site_config:
+            raise ValueError(f"No configuration found for vendor: {vendor}")
+
+        task_description = f"""
+        Navigate to {vendor}'s {category} category page and prepare for product extraction.
+
+        Vendor: {vendor}
+        Category: {category}
+        Session ID: {session_id}
+        Base URL: {site_config.base_url}
+
+        NAVIGATION STEPS:
+        1. Navigate to the vendor's base URL: {site_config.base_url}
+        2. Handle initial popups and consent banners using vendor-specific patterns
+        3. Navigate to the {category} category section
+        4. Verify the category page loaded correctly
+        5. Handle any additional popups or age verification if needed
+        6. Prepare the page for product extraction
+
+        VENDOR-SPECIFIC REQUIREMENTS:
+        - Rate limit: Wait {site_config.delay_between_requests} seconds between actions
+        - Cookie consent: Handle GDPR compliance appropriately
+        - Location selection: Set to UK if prompted
+        - Age verification: Handle for restricted categories
+        - Anti-bot measures: Use natural interaction patterns
+
+        CRITICAL: Report any navigation failures or obstacles encountered.
+        The page must be ready for product extraction when this task completes.
+        """
+
+        return Task(
+            description=task_description,
+            agent=self.agent,
+            expected_output="""
+            A navigation report containing:
+            - success: boolean indicating if navigation was successful
+            - current_url: the final URL reached
+            - category_verified: boolean indicating if correct category page was reached
+            - obstacles_encountered: list of any popups, banners, or challenges handled
+            - ready_for_extraction: boolean indicating if page is ready for product scraping
+            - error_message: any error details if navigation failed
+            """
+        )
+
     def create_navigation_task(self, target_url: str, navigation_goal: str):
         """Create a task for navigating to a specific page or section."""
         from crewai import Task

@@ -3,7 +3,7 @@
 from datetime import datetime
 from decimal import Decimal
 from typing import List, Optional, Dict, Any
-from pydantic import BaseModel, Field, HttpUrl, validator
+from pydantic import BaseModel, Field, HttpUrl, field_validator
 from enum import Enum
 
 
@@ -35,7 +35,8 @@ class ProductPrice(BaseModel):
     price_range_min: Optional[Decimal] = Field(None, description="Minimum price for variable pricing")
     price_range_max: Optional[Decimal] = Field(None, description="Maximum price for variable pricing")
     
-    @validator('discount_percentage')
+    @field_validator('discount_percentage')
+    @classmethod
     def validate_discount(cls, v):
         if v is not None and (v < 0 or v > 100):
             raise ValueError('Discount percentage must be between 0 and 100')
@@ -68,7 +69,8 @@ class ProductReview(BaseModel):
     review_count: Optional[int] = Field(None, description="Total number of reviews")
     rating_distribution: Optional[Dict[str, int]] = Field(None, description="Rating distribution (e.g., {'5': 100, '4': 50})")
     
-    @validator('rating')
+    @field_validator('rating')
+    @classmethod
     def validate_rating(cls, v):
         if v is not None and (v < 0 or v > 5):
             raise ValueError('Rating must be between 0 and 5')
@@ -124,11 +126,12 @@ class Product(BaseModel):
     # Additional metadata
     metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional metadata")
     
-    class Config:
-        json_encoders = {
+    model_config = {
+        "json_encoders": {
             datetime: lambda v: v.isoformat(),
             Decimal: lambda v: float(v),
         }
+    }
     
     def get_primary_image(self) -> Optional[ProductImage]:
         """Get the primary product image."""

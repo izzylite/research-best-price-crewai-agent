@@ -5,7 +5,7 @@ import logging
 from pathlib import Path
 from typing import Optional, Dict, Any
 from pydantic_settings import BaseSettings
-from pydantic import Field, validator
+from pydantic import Field, field_validator
 
 
 class Settings(BaseSettings):
@@ -42,23 +42,26 @@ class Settings(BaseSettings):
     log_level: str = Field("INFO", env="LOG_LEVEL")
     log_format: str = Field("%(asctime)s - %(name)s - %(levelname)s - %(message)s", env="LOG_FORMAT")
     
-    @validator('browserbase_api_key', 'browserbase_project_id')
-    def validate_required_fields(cls, v, field):
+    @field_validator('browserbase_api_key', 'browserbase_project_id')
+    @classmethod
+    def validate_required_fields(cls, v, info):
         if not v:
-            raise ValueError(f"{field.name} is required")
+            raise ValueError(f"{info.field_name} is required")
         return v
 
-    @validator('log_level')
+    @field_validator('log_level')
+    @classmethod
     def validate_log_level(cls, v):
         valid_levels = ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']
         if v.upper() not in valid_levels:
             raise ValueError(f"log_level must be one of {valid_levels}")
         return v.upper()
 
-    class Config:
+    model_config = {
         # Look for .env in the project root directory
-        env_file = Path(__file__).parent.parent.parent / ".env"
-        env_file_encoding = "utf-8"
+        "env_file": Path(__file__).parent.parent.parent / ".env",
+        "env_file_encoding": "utf-8"
+    }
     
     def get_model_api_key(self) -> str:
         """Get the appropriate API key based on the selected model."""
@@ -89,7 +92,7 @@ class Settings(BaseSettings):
 
     def get_safe_config(self) -> Dict[str, Any]:
         """Get configuration without sensitive data for logging."""
-        config = self.dict()
+        config = self.model_dump()
         # Remove sensitive fields
         sensitive_fields = ['browserbase_api_key', 'openai_api_key', 'anthropic_api_key']
         for field in sensitive_fields:
