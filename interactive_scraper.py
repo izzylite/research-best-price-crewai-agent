@@ -118,8 +118,8 @@ def get_single_product_details():
     # Show some example URLs
     console.print("\n[dim]Example URLs you can try:[/dim]")
     examples = [
-        "https://demo.vercel.store/products/acme-mug",
-        "https://demo.vercel.store/products/acme-shirt",
+        "https://demo.vercel.store/product/acme-geometric-circles-t-shirt",
+        "https://demo.vercel.store/search",
         "https://www.amazon.com/dp/[product-id]",
         "https://www.ebay.com/itm/[item-id]"
     ]

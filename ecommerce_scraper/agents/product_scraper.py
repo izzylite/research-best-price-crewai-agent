@@ -1,27 +1,27 @@
 """Main product scraper agent that coordinates the scraping process."""
 
 from typing import List, Optional
-from crewai import Agent
+from crewai import Agent, LLM
 
 
 class ProductScraperAgent:
     """Main agent that coordinates product scraping across different ecommerce sites."""
     
-    def __init__(self, tools: List):
+    def __init__(self, tools: List, llm: Optional[LLM] = None):
         """Initialize the product scraper agent with required tools."""
-        
-        self.agent = Agent(
-            role="Product Scraping Coordinator",
-            goal="""
+
+        agent_config = {
+            "role": "Product Scraping Coordinator",
+            "goal": """
             Coordinate the extraction of comprehensive product information from ecommerce websites.
             Ensure data quality, handle errors gracefully, and maintain respectful scraping practices.
             """,
-            backstory="""
+            "backstory": """
             You are an expert ecommerce data analyst with deep knowledge of online retail platforms.
             You understand the structure of product pages across different sites and can adapt your
             approach based on the specific ecommerce platform. You prioritize data accuracy and
             completeness while respecting website terms of service and rate limits.
-            
+
             Your expertise includes:
             - Navigating complex ecommerce site structures
             - Identifying and extracting product information
@@ -29,12 +29,17 @@ class ProductScraperAgent:
             - Dealing with anti-bot measures and CAPTCHAs
             - Ensuring data quality and consistency
             """,
-            verbose=True,
-            allow_delegation=True,
-            tools=tools,
-            max_iter=5,
-            memory=True
-        )
+            "verbose": True,
+            "allow_delegation": True,
+            "tools": tools,
+            "max_iter": 5,
+            "memory": False
+        }
+
+        if llm:
+            agent_config["llm"] = llm
+
+        self.agent = Agent(**agent_config)
     
     def create_scraping_task(self, product_url: str, site_type: Optional[str] = None):
         """Create a task for scraping a specific product."""

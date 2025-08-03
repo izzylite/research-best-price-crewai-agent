@@ -6,14 +6,33 @@ This script provides simple commands to scrape products.
 
 import sys
 import json
+import os
+
+# Load environment variables FIRST
 from dotenv import load_dotenv
+load_dotenv()
+
+# Import settings for enhanced configuration
+from ecommerce_scraper.config.settings import settings
+
+# Setup logging
+settings.setup_logging()
+import logging
+logger = logging.getLogger(__name__)
+
+# Set OpenAI API key directly from .env before any other imports
+openai_key = os.getenv("OPENAI_API_KEY")
+if openai_key:
+    os.environ["OPENAI_API_KEY"] = openai_key
+    logger.info(f"✅ OpenAI API key loaded: {openai_key[:20]}...")
+else:
+    logger.error("❌ OpenAI API key not found in environment")
+    print("❌ OpenAI API key not found in environment")
+
 from rich.console import Console
 from rich.panel import Panel
 from rich.prompt import Prompt, Confirm
 from rich.table import Table
-
-# Load environment variables
-load_dotenv()
 
 console = Console()
 

@@ -12,6 +12,11 @@ A comprehensive, multi-agent ecommerce scraping system built with **Stagehand** 
 - **⚡ Cloud Browser Infrastructure**: Powered by Browserbase for reliable, scalable scraping
 - **🛡️ Respectful Scraping**: Built-in rate limiting and anti-bot measure handling
 - **📈 Batch Processing**: Support for single products, bulk scraping, and search-based extraction
+- **🔐 Security Best Practices**: Variable substitution for sensitive data, secure configuration management
+- **💾 Performance Optimization**: Intelligent caching, retry logic with exponential backoff
+- **👀 Action Previewing**: Preview actions before execution to reduce costs and prevent errors
+- **📝 Comprehensive Logging**: Structured logging with configurable levels and automatic log files
+- **🏗️ Context Manager Support**: Automatic resource cleanup and session management
 
 ## 🏗️ Architecture
 
@@ -47,6 +52,19 @@ pip install -r requirements.txt
 ```bash
 cp .env.example .env
 # Edit .env with your API keys
+```
+
+Required environment variables:
+```bash
+BROWSERBASE_API_KEY=your_browserbase_api_key
+BROWSERBASE_PROJECT_ID=your_project_id
+OPENAI_API_KEY=your_openai_api_key
+
+# Optional performance settings
+ENABLE_CACHING=true
+CACHE_TTL_SECONDS=3600
+MAX_RETRIES=3
+LOG_LEVEL=INFO
 ```
 
 Required environment variables:

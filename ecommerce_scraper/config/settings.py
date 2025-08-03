@@ -1,9 +1,11 @@
 """Application settings and configuration."""
 
 import os
-from typing import Optional
+import logging
+from pathlib import Path
+from typing import Optional, Dict, Any
 from pydantic_settings import BaseSettings
-from pydantic import Field
+from pydantic import Field, validator
 
 
 class Settings(BaseSettings):
@@ -27,9 +29,35 @@ class Settings(BaseSettings):
     default_delay_between_requests: int = Field(2, env="DEFAULT_DELAY_BETWEEN_REQUESTS")
     max_retries: int = Field(3, env="MAX_RETRIES")
     respect_robots_txt: bool = Field(True, env="RESPECT_ROBOTS_TXT")
+
+    # Security Configuration
+    enable_variable_substitution: bool = Field(True, env="ENABLE_VARIABLE_SUBSTITUTION")
+    log_sensitive_data: bool = Field(False, env="LOG_SENSITIVE_DATA")
+
+    # Performance Configuration
+    enable_caching: bool = Field(True, env="ENABLE_CACHING")
+    cache_ttl_seconds: int = Field(3600, env="CACHE_TTL_SECONDS")  # 1 hour default
+
+    # Logging Configuration
+    log_level: str = Field("INFO", env="LOG_LEVEL")
+    log_format: str = Field("%(asctime)s - %(name)s - %(levelname)s - %(message)s", env="LOG_FORMAT")
     
+    @validator('browserbase_api_key', 'browserbase_project_id')
+    def validate_required_fields(cls, v, field):
+        if not v:
+            raise ValueError(f"{field.name} is required")
+        return v
+
+    @validator('log_level')
+    def validate_log_level(cls, v):
+        valid_levels = ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']
+        if v.upper() not in valid_levels:
+            raise ValueError(f"log_level must be one of {valid_levels}")
+        return v.upper()
+
     class Config:
-        env_file = ".env"
+        # Look for .env in the project root directory
+        env_file = Path(__file__).parent.parent.parent / ".env"
         env_file_encoding = "utf-8"
     
     def get_model_api_key(self) -> str:
@@ -47,6 +75,27 @@ class Settings(BaseSettings):
             if not self.openai_api_key:
                 raise ValueError("OpenAI API key is required")
             return self.openai_api_key
+
+    def setup_logging(self) -> None:
+        """Setup logging configuration."""
+        logging.basicConfig(
+            level=getattr(logging, self.log_level),
+            format=self.log_format,
+            handlers=[
+                logging.StreamHandler(),
+                logging.FileHandler('ecommerce_scraper.log')
+            ]
+        )
+
+    def get_safe_config(self) -> Dict[str, Any]:
+        """Get configuration without sensitive data for logging."""
+        config = self.dict()
+        # Remove sensitive fields
+        sensitive_fields = ['browserbase_api_key', 'openai_api_key', 'anthropic_api_key']
+        for field in sensitive_fields:
+            if field in config and config[field]:
+                config[field] = f"{config[field][:8]}..." if len(config[field]) > 8 else "***"
+        return config
 
 
 # Global settings instance

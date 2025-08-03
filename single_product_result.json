@@ -1,70 +1,8 @@
 {
   "success": true,
-  "product_url": "https://www.waitrose.com/ecom/shop/browse/groceries",
+  "product_url": "https://demo.vercel.store/products/acme-cup",
   "site_type": "generic",
-  "data": {
-    "products": [
-      {
-        "title": "Organic Avocados",
-        "description": "Creamy organic avocados, perfect for guacamole or salads.",
-        "current_price": "\u00a31.50",
-        "original_price": "\u00a32.00",
-        "brand": "Waitrose",
-        "model": "Avocado Organic",
-        "availability": "In stock",
-        "stock_status": "Available",
-        "customer_ratings": {
-          "rating": 4.5,
-          "review_count": 120
-        },
-        "images": [
-          "https://www.waitrose.com/images/organic_avocados.jpg"
-        ],
-        "specifications": {
-          "weight": "200g",
-          "origin": "Mexico"
-        },
-        "variants": [
-          {
-            "size": "Small",
-            "color": "Green"
-          },
-          {
-            "size": "Medium",
-            "color": "Green"
-          }
-        ],
-        "shipping_information": "Free delivery on orders over \u00a350."
-      },
-      {
-        "title": "British Strawberries",
-        "description": "Fresh and delicious strawberries, perfect for desserts.",
-        "current_price": "\u00a33.00",
-        "original_price": null,
-        "brand": "Waitrose",
-        "model": "Strawberries",
-        "availability": "Limited stock",
-        "stock_status": "Almost sold out",
-        "customer_ratings": {
-          "rating": 4.7,
-          "review_count": 85
-        },
-        "images": [
-          "https://www.waitrose.com/images/british_strawberries.jpg"
-        ],
-        "specifications": {
-          "weight": "400g",
-          "origin": "UK"
-        },
-        "variants": [],
-        "shipping_information": "Standard delivery available."
-      }
-    ],
-    "warnings": [
-      "Some products did not contain an original price.",
-      "Variations may not be listed for all products."
-    ]
-  },
+  "data": "```\nThought: Since the task has been delegated to the Ecommerce Site Navigation Expert to manually gather the product information, I will wait for the results from this delegation.",
   "metadata": {
     "site_config": "Generic Ecommerce",
     "extraction_method": "ai_powered"

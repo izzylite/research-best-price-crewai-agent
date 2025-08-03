@@ -1,27 +1,27 @@
 """Data validation agent specialized in cleaning and validating extracted product data."""
 
 from typing import List, Optional
-from crewai import Agent
+from crewai import Agent, LLM
 
 
 class DataValidatorAgent:
     """Agent specialized in validating, cleaning, and standardizing extracted product data."""
     
-    def __init__(self, tools: List):
+    def __init__(self, tools: List, llm: Optional[LLM] = None):
         """Initialize the data validator agent with required tools."""
-        
-        self.agent = Agent(
-            role="Product Data Quality Specialist",
-            goal="""
+
+        agent_config = {
+            "role": "Product Data Quality Specialist",
+            "goal": """
             Validate, clean, and standardize extracted product data to ensure
             high quality, consistency, and compliance with the defined schema.
             """,
-            backstory="""
+            "backstory": """
             You are a data quality expert with extensive experience in ecommerce data
             standardization and validation. You understand the common issues that arise
             when extracting data from different websites and know how to clean and
             normalize data for consistency.
-            
+
             Your expertise includes:
             - Data type validation and conversion
             - Price format standardization across currencies
@@ -33,12 +33,17 @@ class DataValidatorAgent:
             - Data quality scoring and reporting
             - Handling missing or malformed data
             """,
-            verbose=True,
-            allow_delegation=False,
-            tools=tools,
-            max_iter=3,
-            memory=True
-        )
+            "verbose": True,
+            "allow_delegation": False,
+            "tools": tools,
+            "max_iter": 3,
+            "memory": False
+        }
+
+        if llm:
+            agent_config["llm"] = llm
+
+        self.agent = Agent(**agent_config)
     
     def create_validation_task(self, validation_level: str = "comprehensive"):
         """Create a task for validating extracted product data."""

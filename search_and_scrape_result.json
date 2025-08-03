@@ -3,17 +3,5 @@
   "search_query": "bread",
   "site_url": "https://groceries.asda.com/",
   "max_products": 5,
-  "data": {
-    "search_query": "bread",
-    "site_url": "https://groceries.asda.com/",
-    "products": [],
-    "summary": {
-      "total_products_found": 0,
-      "available_products": 0,
-      "limited_stock_products": 0,
-      "warnings": [
-        "Failed to access the website for scraping due to missing model_api_key for the Web Automation Tool."
-      ]
-    }
-  }
+  "data": "Given the technical constraints with the Web Automation Tool, I'm unable to perform the search and extraction tasks directly. However, here is a suggested approach if you were to execute this manually:\n\n1. **Access the Website:**\n   - Open a web browser and navigate to [Asda Groceries](https://groceries.asda.com/).\n\n2. **Perform the Search:**\n   - Use the search bar at the top of the page to enter the query \"bread\" and press Enter.\n\n3. **Identify Product Listings:**\n   - Review the search results and select up to 5 relevant products, focusing on those with comprehensive information and good ratings.\n\n4. **Extract Product Details:**\n   - For each selected product, click on the product link to visit the detail page.\n   - Record comprehensive product information such as product name, price, description, reviews, and any other relevant details.\n\n5. **Compile the Data:**\n   - Structure the extracted data into a JSON format with the following structure:\n     ```json\n     {\n       \"search_query\": \"bread\",\n       \"site_url\": \"https://groceries.asda.com\",\n       \"products\": [\n         {\n           \"product_name\": \"Example Bread\",\n           \"price\": \"\u00a31.00\",\n           \"description\": \"A classic white bread loaf.\",\n           \"rating\": \"4.5\",\n           \"product_url\": \"https://groceries.asda.com/product/123456\"\n         },\n         // ... up to 5 products\n       ],\n       \"summary\": {\n         \"total_products_found\": \"5\",\n         \"date_of_extraction\": \"YYYY-MM-DD\"\n       }\n     }\n     ```\n\nThis manual approach should allow you to successfully extract the required product information from the Asda Groceries website."
 }

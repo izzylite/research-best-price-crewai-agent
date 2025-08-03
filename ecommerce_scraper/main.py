@@ -1,8 +1,41 @@
 """Main ecommerce scraper class that orchestrates the scraping process."""
 
 import json
+import os
+import logging
 from typing import List, Optional, Dict, Any, Union
-from crewai import Crew
+
+# Load settings first to get API keys
+from .config.settings import settings
+
+# Setup logging
+settings.setup_logging()
+logger = logging.getLogger(__name__)
+
+# Set ALL environment variables BEFORE importing any CrewAI or Stagehand modules
+# This is critical for proper API key forwarding to remote Browserbase sessions
+
+# Set Browserbase environment variables from settings
+os.environ["BROWSERBASE_API_KEY"] = settings.browserbase_api_key
+os.environ["BROWSERBASE_PROJECT_ID"] = settings.browserbase_project_id
+
+# Set LLM API keys for CrewAI
+if settings.openai_api_key:
+    os.environ["OPENAI_API_KEY"] = settings.openai_api_key
+    # CRITICAL: Set MODEL_API_KEY for Stagehand remote session creation
+    os.environ["MODEL_API_KEY"] = settings.openai_api_key
+    # ADDITIONAL: Set STAGEHAND_MODEL_API_KEY as backup
+    os.environ["STAGEHAND_MODEL_API_KEY"] = settings.openai_api_key
+    logger.info(f"🔑 Set API keys for Stagehand: {settings.openai_api_key[:20]}...")
+else:
+    logger.error("OpenAI API key is required but not found in settings")
+    raise ValueError("OpenAI API key is required but not found in settings")
+
+if settings.anthropic_api_key:
+    os.environ["ANTHROPIC_API_KEY"] = settings.anthropic_api_key
+
+# Now import CrewAI after environment variables are set
+from crewai import Crew, LLM
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
@@ -12,10 +45,10 @@ from .agents.data_extractor import DataExtractorAgent
 from .agents.data_validator import DataValidatorAgent
 from .config.sites import get_site_config, detect_site_type, SiteType
 from .schemas.product import Product
+from crewai_tools import StagehandTool
 from stagehand.schemas import AvailableModel
-from .tools.stagehand_tool import StagehandTool
 from .tools.data_tools import ProductDataValidator, PriceExtractor, ImageExtractor
-from .config.settings import settings
+from .tools.stagehand_tool import EcommerceStagehandTool
 
 
 class EcommerceScraper:
@@ -25,65 +58,93 @@ class EcommerceScraper:
         """Initialize the ecommerce scraper."""
         self.console = Console()
         self.verbose = verbose
-        
-        # Official Stagehand tool instance
-        self.stagehand_tool = StagehandTool(
-            api_key=settings.browserbase_api_key,
-            project_id=settings.browserbase_project_id,
-            model_api_key=settings.get_model_api_key(),
-            model_name=AvailableModel.GPT_4O,
-            headless=settings.stagehand_headless,
-            verbose=settings.stagehand_verbose if verbose else 0
+
+        # Configure LLM for CrewAI agents
+        self.llm = LLM(
+            model="gpt-4o",
+            temperature=0.7,
+            max_tokens=4000
         )
 
-        # Initialize agents with role-specific tools
-        # ProductScraperAgent: Coordinator - needs StagehandTool and ProductDataValidator
-        product_scraper_tools = [self.stagehand_tool, ProductDataValidator()]
-        self.product_scraper = ProductScraperAgent(tools=product_scraper_tools)
+        # Create StagehandTool with proper configuration
+        # Environment variables are already set at module level
+        # Note: StagehandTool will be created as context manager when needed
+        self.stagehand_config = {
+            "api_key": settings.browserbase_api_key,
+            "project_id": settings.browserbase_project_id,
+            "model_api_key": settings.openai_api_key,
+            "model_name": AvailableModel.GPT_4O,
+            "dom_settle_timeout_ms": settings.stagehand_dom_settle_timeout_ms,
+            "headless": settings.stagehand_headless,
+            "verbose": settings.stagehand_verbose if verbose else 0
+        }
+        self.stagehand_tool = None
 
-        # SiteNavigatorAgent: Navigation - needs only StagehandTool
-        site_navigator_tools = [self.stagehand_tool]
-        self.site_navigator = SiteNavigatorAgent(tools=site_navigator_tools)
+        # Initialize agents with role-specific tools and LLM
+        # Note: StagehandTool will be added dynamically when needed
 
-        # DataExtractorAgent: Data extraction - needs StagehandTool and specialized extractors
-        data_extractor_tools = [self.stagehand_tool, PriceExtractor(), ImageExtractor()]
-        self.data_extractor = DataExtractorAgent(tools=data_extractor_tools)
+        # ProductScraperAgent: Coordinator - needs ProductDataValidator
+        product_scraper_tools = [ProductDataValidator()]
+        self.product_scraper = ProductScraperAgent(tools=product_scraper_tools, llm=self.llm)
+
+        # SiteNavigatorAgent: Navigation - will get StagehandTool dynamically
+        site_navigator_tools = []
+        self.site_navigator = SiteNavigatorAgent(tools=site_navigator_tools, llm=self.llm)
+
+        # DataExtractorAgent: Data extraction - needs specialized extractors
+        data_extractor_tools = [PriceExtractor(), ImageExtractor()]
+        self.data_extractor = DataExtractorAgent(tools=data_extractor_tools, llm=self.llm)
 
         # DataValidatorAgent: Data validation - needs validation and price tools
         data_validator_tools = [ProductDataValidator(), PriceExtractor()]
-        self.data_validator = DataValidatorAgent(tools=data_validator_tools)
-    
+        self.data_validator = DataValidatorAgent(tools=data_validator_tools, llm=self.llm)
+
+    def _create_stagehand_tool(self):
+        """Create a StagehandTool instance with proper configuration."""
+        # Use our custom EcommerceStagehandTool instead of the buggy CrewAI StagehandTool
+        return EcommerceStagehandTool()
+
     def scrape_product(self, product_url: str, site_type: Optional[str] = None) -> Dict[str, Any]:
         """
         Scrape a single product from the given URL.
-        
+
         Args:
             product_url: URL of the product page to scrape
             site_type: Optional site type hint (amazon, ebay, shopify, generic)
-            
+
         Returns:
             Dictionary containing the scraped product data and metadata
         """
+        # Create StagehandTool instance for this scraping session
+        stagehand_tool = None
         try:
             if self.verbose:
                 self.console.print(f"[bold blue]Scraping product:[/bold blue] {product_url}")
-            
+
             # Detect site type if not provided
             if site_type is None:
                 detected_type = detect_site_type(product_url)
                 site_type = detected_type.value
-            
+
             site_config = get_site_config(product_url)
-            
+
             if self.verbose:
                 self.console.print(f"[green]Detected site type:[/green] {site_type}")
-            
+
+            # Create StagehandTool instance
+            stagehand_tool = self._create_stagehand_tool()
+
+            # Add StagehandTool to agents that need it
+            self.site_navigator.get_agent().tools = [stagehand_tool]
+            self.data_extractor.get_agent().tools = [stagehand_tool, PriceExtractor(), ImageExtractor()]
+            self.product_scraper.get_agent().tools = [stagehand_tool, ProductDataValidator()]
+
             # Create and execute scraping task
             scraping_task = self.product_scraper.create_scraping_task(
                 product_url=product_url,
                 site_type=site_type
             )
-            
+
             # Create crew with all agents
             crew = Crew(
                 agents=[
@@ -144,18 +205,28 @@ class EcommerceScraper:
                     "extraction_method": "ai_powered"
                 }
             }
-            
+
         except Exception as e:
             error_msg = f"Error scraping product {product_url}: {str(e)}"
             if self.verbose:
                 self.console.print(f"[bold red]✗ {error_msg}[/bold red]")
-            
+
             return {
                 "success": False,
                 "product_url": product_url,
                 "error": error_msg,
                 "data": None
             }
+        finally:
+            # Always cleanup the StagehandTool session
+            if stagehand_tool:
+                try:
+                    stagehand_tool.close()
+                    if self.verbose:
+                        self.console.print("[dim]🧹 StagehandTool session cleaned up[/dim]")
+                except Exception as cleanup_error:
+                    if self.verbose:
+                        self.console.print(f"[dim]⚠️ Warning: StagehandTool cleanup failed: {cleanup_error}[/dim]")
     
     def scrape_products(self, product_urls: List[str], site_type: Optional[str] = None) -> List[Dict[str, Any]]:
         """
@@ -214,7 +285,7 @@ class EcommerceScraper:
                 max_products=max_products
             )
             
-            # Create crew
+            # Create crew without memory to avoid API key issues
             crew = Crew(
                 agents=[
                     self.product_scraper.get_agent(),
@@ -224,7 +295,7 @@ class EcommerceScraper:
                 ],
                 tasks=[search_task],
                 verbose=self.verbose,
-                memory=True
+                memory=False
             )
             
             # Execute the search and scraping

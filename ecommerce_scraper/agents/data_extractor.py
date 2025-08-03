@@ -1,26 +1,26 @@
 """Data extraction agent specialized in extracting structured product information."""
 
-from typing import List
-from crewai import Agent
+from typing import List, Optional
+from crewai import Agent, LLM
 
 
 class DataExtractorAgent:
     """Agent specialized in extracting structured product data from ecommerce pages."""
     
-    def __init__(self, tools: List):
+    def __init__(self, tools: List, llm: Optional[LLM] = None):
         """Initialize the data extractor agent with required tools."""
-        
-        self.agent = Agent(
-            role="Product Data Extraction Specialist",
-            goal="""
+
+        agent_config = {
+            "role": "Product Data Extraction Specialist",
+            "goal": """
             Extract comprehensive and accurate product information from ecommerce pages,
             ensuring all relevant data is captured in a structured format.
             """,
-            backstory="""
+            "backstory": """
             You are a data extraction expert with deep knowledge of ecommerce product structures
             across different platforms. You understand how product information is typically
             organized and can adapt your extraction strategies based on the site layout.
-            
+
             Your expertise includes:
             - Identifying product titles, descriptions, and specifications
             - Extracting pricing information including sales and discounts
@@ -31,12 +31,17 @@ class DataExtractorAgent:
             - Recognizing structured data markup (JSON-LD, microdata)
             - Dealing with different currency formats and international sites
             """,
-            verbose=True,
-            allow_delegation=False,
-            tools=tools,
-            max_iter=4,
-            memory=True
-        )
+            "verbose": True,
+            "allow_delegation": False,
+            "tools": tools,
+            "max_iter": 4,
+            "memory": False
+        }
+
+        if llm:
+            agent_config["llm"] = llm
+
+        self.agent = Agent(**agent_config)
     
     def create_basic_extraction_task(self, extraction_focus: str = "complete"):
         """Create a task for basic product data extraction."""

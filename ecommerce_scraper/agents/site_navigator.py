@@ -1,26 +1,26 @@
 """Site navigation agent specialized in navigating different ecommerce platforms."""
 
 from typing import List, Optional
-from crewai import Agent
+from crewai import Agent, LLM
 
 
 class SiteNavigatorAgent:
     """Agent specialized in navigating ecommerce sites and handling site-specific challenges."""
     
-    def __init__(self, tools: List):
+    def __init__(self, tools: List, llm: Optional[LLM] = None):
         """Initialize the site navigator agent with required tools."""
-        
-        self.agent = Agent(
-            role="Ecommerce Site Navigation Expert",
-            goal="""
+
+        agent_config = {
+            "role": "Ecommerce Site Navigation Expert",
+            "goal": """
             Navigate ecommerce websites efficiently and handle site-specific challenges
             such as cookie banners, age verification, CAPTCHAs, and complex navigation structures.
             """,
-            backstory="""
+            "backstory": """
             You are a web navigation specialist with extensive experience across major ecommerce
             platforms including Amazon, eBay, Shopify stores, and custom ecommerce sites.
             You understand the common patterns and challenges in ecommerce site navigation.
-            
+
             Your expertise includes:
             - Handling cookie consent banners and privacy notices
             - Navigating complex category structures and filters
@@ -30,12 +30,17 @@ class SiteNavigatorAgent:
             - Recognizing and bypassing common anti-bot measures
             - Understanding mobile vs desktop layout differences
             """,
-            verbose=True,
-            allow_delegation=False,
-            tools=tools,
-            max_iter=3,
-            memory=True
-        )
+            "verbose": True,
+            "allow_delegation": False,
+            "tools": tools,
+            "max_iter": 3,
+            "memory": False
+        }
+
+        if llm:
+            agent_config["llm"] = llm
+
+        self.agent = Agent(**agent_config)
     
     def create_navigation_task(self, target_url: str, navigation_goal: str):
         """Create a task for navigating to a specific page or section."""
