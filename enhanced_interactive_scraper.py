@@ -175,182 +175,22 @@ def discover_categories_for_vendor(vendor_id: str) -> List[Dict[str, Any]]:
     vendor_info = UK_VENDORS[vendor_id]
     console.print(f"\n[blue]🔍 Loading categories for {vendor_info['name']}...[/blue]")
 
-    # Real categories extracted from actual websites using Browserbase
-    real_categories = {
-        # ASDA: Grocery subcategories from the Groceries dropdown menu
-        "asda": [
-            {"id": "rollback", "name": "Rollback", "url": "/groceries/rollback"},
-            {"id": "summer", "name": "Summer", "url": "/groceries/summer"},
-            {"id": "events-inspiration", "name": "Events & Inspiration", "url": "/groceries/events-inspiration"},
-            {"id": "fruit-veg-flowers", "name": "Fruit, Veg & Flowers", "url": "/groceries/fruit-veg-flowers"},
-            {"id": "meat-poultry-fish", "name": "Meat, Poultry & Fish", "url": "/groceries/meat-poultry-fish"},
-            {"id": "bakery", "name": "Bakery", "url": "/groceries/bakery"},
-            {"id": "chilled-food", "name": "Chilled Food", "url": "/groceries/chilled-food"},
-            {"id": "frozen-food", "name": "Frozen Food", "url": "/groceries/frozen-food"},
-            {"id": "food-cupboard", "name": "Food Cupboard", "url": "/groceries/food-cupboard"},
-            {"id": "sweets-treats-snacks", "name": "Sweets, Treats & Snacks", "url": "/groceries/sweets-treats-snacks"},
-            {"id": "dietary-lifestyle", "name": "Dietary & Lifestyle", "url": "/groceries/dietary-lifestyle"},
-            {"id": "drinks", "name": "Drinks", "url": "/groceries/drinks"},
-            {"id": "beer-wine-spirits", "name": "Beer, Wine & Spirits", "url": "/groceries/beer-wine-spirits"},
-            {"id": "toiletries-beauty", "name": "Toiletries & Beauty", "url": "/groceries/toiletries-beauty"},
-            {"id": "laundry-household", "name": "Laundry & Household", "url": "/groceries/laundry-household"},
-            {"id": "baby-toddler-kids", "name": "Baby, Toddler & Kids", "url": "/groceries/baby-toddler-kids"},
-            {"id": "pet-food-accessories", "name": "Pet Food & Accessories", "url": "/groceries/pet-food-accessories"},
-            {"id": "health-wellness", "name": "Health & Wellness", "url": "/groceries/health-wellness"},
-            {"id": "home-entertainment", "name": "Home & Entertainment", "url": "/groceries/home-entertainment"},
-            {"id": "world-food", "name": "World Food", "url": "/groceries/world-food"}
-        ],
+    # Load categories from JSON file
+    categories_file = Path(__file__).parent / "categories.json"
 
-        # Tesco: All Departments subcategories from the dropdown menu
-        "tesco": [
-            {"id": "marketplace", "name": "Marketplace", "url": "/departments/marketplace"},
-            {"id": "clothing-accessories", "name": "Clothing & Accessories", "url": "/departments/clothing-accessories"},
-            {"id": "summer", "name": "Summer", "url": "/departments/summer"},
-            {"id": "fresh-food", "name": "Fresh Food", "url": "/departments/fresh-food"},
-            {"id": "bakery", "name": "Bakery", "url": "/departments/bakery"},
-            {"id": "frozen-food", "name": "Frozen Food", "url": "/departments/frozen-food"},
-            {"id": "treats-snacks", "name": "Treats & Snacks", "url": "/departments/treats-snacks"},
-            {"id": "food-cupboard", "name": "Food Cupboard", "url": "/departments/food-cupboard"},
-            {"id": "drinks", "name": "Drinks", "url": "/departments/drinks"},
-            {"id": "baby-toddler", "name": "Baby & Toddler", "url": "/departments/baby-toddler"},
-            {"id": "health-beauty", "name": "Health & Beauty", "url": "/departments/health-beauty"},
-            {"id": "pets", "name": "Pets", "url": "/departments/pets"},
-            {"id": "household", "name": "Household", "url": "/departments/household"},
-            {"id": "home-ents", "name": "Home & Ents", "url": "/departments/home-ents"},
-            {"id": "back-to-school", "name": "Back To School", "url": "/departments/back-to-school"},
-            {"id": "electronics-gaming", "name": "Electronics & Gaming", "url": "/departments/electronics-gaming"},
-            {"id": "toys-games", "name": "Toys & Games", "url": "/departments/toys-games"},
-            {"id": "inspiration-events", "name": "Inspiration & Events", "url": "/departments/inspiration-events"}
-        ],
+    try:
+        with open(categories_file, 'r', encoding='utf-8') as f:
+            real_categories = json.load(f)
+    except FileNotFoundError:
+        console.print(f"[red]❌ Categories file not found: {categories_file}[/red]")
+        return []
+    except json.JSONDecodeError as e:
+        console.print(f"[red]❌ Error parsing categories file: {e}[/red]")
+        return []
+    except Exception as e:
+        console.print(f"[red]❌ Error loading categories: {e}[/red]")
+        return []
 
-        # Waitrose: Groceries subcategories from the dropdown menu
-        "waitrose": [
-            {"id": "view-all-groceries", "name": "View all Groceries", "url": "/groceries/view-all"},
-            {"id": "groceries-offers", "name": "Groceries OFFERS", "url": "/groceries/offers"},
-            {"id": "summer", "name": "Summer", "url": "/groceries/summer"},
-            {"id": "fresh-chilled", "name": "Fresh & Chilled", "url": "/groceries/fresh-chilled"},
-            {"id": "frozen", "name": "Frozen", "url": "/groceries/frozen"},
-            {"id": "bakery", "name": "Bakery", "url": "/groceries/bakery"},
-            {"id": "food-cupboard", "name": "Food Cupboard", "url": "/groceries/food-cupboard"},
-            {"id": "beer-wine-spirits", "name": "Beer, Wine & Spirits", "url": "/groceries/beer-wine-spirits"},
-            {"id": "tea-coffee-soft-drinks", "name": "Tea, Coffee & Soft Drinks", "url": "/groceries/tea-coffee-soft-drinks"},
-            {"id": "household", "name": "Household", "url": "/groceries/household"},
-            {"id": "toiletries-health-beauty", "name": "Toiletries, Health & Beauty", "url": "/groceries/toiletries-health-beauty"},
-            {"id": "baby-toddler", "name": "Baby & Toddler", "url": "/groceries/baby-toddler"},
-            {"id": "pet", "name": "Pet", "url": "/groceries/pet"},
-            {"id": "home", "name": "Home", "url": "/groceries/home"},
-            {"id": "new", "name": "New", "url": "/groceries/new"},
-            {"id": "dietary-lifestyle", "name": "Dietary & Lifestyle", "url": "/groceries/dietary-lifestyle"},
-            {"id": "organic-shop", "name": "Organic Shop", "url": "/groceries/organic-shop"},
-            {"id": "shop-by-occasion", "name": "Shop by Occasion", "url": "/groceries/shop-by-occasion"},
-            {"id": "waitrose-brands", "name": "Waitrose Brands", "url": "/groceries/waitrose-brands"},
-            {"id": "brandhub-new", "name": "BrandHub New", "url": "/groceries/brandhub-new"},
-            {"id": "everyday-value", "name": "Everyday Value", "url": "/groceries/everyday-value"},
-            {"id": "best-of-british", "name": "Best of British", "url": "/groceries/best-of-british"}
-        ],
-
-        # Next: Bold main categories from the navigation menu
-        "next": [
-            {
-                "id": "women",
-                "name": "Women",
-                "url": "/women",
-                "subcategories": [
-                    {"id": "shop-all", "name": "Shop All", "url": "/women/shop-all"},
-                    {"id": "clothing", "name": "All Clothing", "url": "/women/clothing"},
-                    {"id": "footwear", "name": "All Footwear", "url": "/women/footwear"},
-                    {"id": "dresses", "name": "Dresses", "url": "/women/dresses"},
-                    {"id": "tops", "name": "Tops", "url": "/women/tops"},
-                    {"id": "jeans-trousers", "name": "Jeans & Trousers", "url": "/women/jeans-trousers"},
-                    {"id": "accessories", "name": "Accessories", "url": "/women/accessories"}
-                ]
-            },
-            {"id": "men", "name": "Men", "url": "/men"},
-            {"id": "girls", "name": "Girls", "url": "/girls"},
-            {"id": "boys", "name": "Boys", "url": "/boys"},
-            {"id": "home", "name": "Home", "url": "/home"},
-            {"id": "beauty", "name": "Beauty", "url": "/beauty"},
-            {"id": "designer-brands", "name": "Designer Brands", "url": "/designer-brands"},
-            {"id": "lipsy", "name": "Lipsy", "url": "/lipsy"},
-            {"id": "shop-clearance", "name": "Shop Clearance", "url": "/shop-clearance"}
-        ],
-
-        # Mamas & Papas: Main navigation categories from the website header: https://www.mamasandpapas.com/
-        "mamasandpapas": [
-            {"id": "sale", "name": "Sale", "url": "/sale", "product_count": "500+"},
-            {"id": "pushchairs", "name": "Pushchairs", "url": "/pushchairs", "product_count": "200+"},
-            {"id": "furniture", "name": "Furniture", "url": "/furniture", "product_count": "300+"},
-            {"id": "clothing", "name": "Clothing", "url": "/clothing", "product_count": "400+"},
-            {"id": "nursery", "name": "Nursery", "url": "/nursery", "product_count": "350+"},
-            {"id": "car-seats", "name": "Car Seats", "url": "/car-seats", "product_count": "150+"},
-            {"id": "bathing-changing", "name": "Bathing & Changing", "url": "/bathing-changing", "product_count": "200+"},
-            {"id": "baby-safety", "name": "Baby Safety", "url": "/baby-safety", "product_count": "180+"},
-            {"id": "feeding-weaning", "name": "Feeding & Weaning", "url": "/feeding-weaning", "product_count": "180+"},
-            {"id": "toys-gifts", "name": "Toys & Gifts", "url": "/toys-gifts", "product_count": "220+"},
-            {"id": "brands", "name": "Brands", "url": "/brands", "product_count": "800+"}
-        ],
-
-        # Primark: "WOMEN", "KIDS", "BABY", "HOME", "MEN" : https://www.primark.com/en-gb
-        "primark": [
-            {"id": "women", "name": "Women", "url": "/women", "product_count": "3000+"},
-            {"id": "men", "name": "Men", "url": "/men", "product_count": "2000+"},
-            {"id": "kids", "name": "Kids", "url": "/kids", "product_count": "1500+"},
-            {"id": "baby", "name": "Baby", "url": "/baby", "product_count": "800+"},
-            {
-                "id": "home",
-                "name": "Home",
-                "url": "/home",
-                "product_count": "1000+",
-                "subcategories": [
-                    {"id": "new-arrivals", "name": "New Arrivals", "url": "/home/new-arrivals", "product_count": "200+"},
-                    {"id": "girly-decor", "name": "Girly Decor", "url": "/home/girly-decor", "product_count": "150+"},
-                    {"id": "bedroom", "name": "Bedroom", "url": "/home/bedroom", "product_count": "300+"},
-                    {"id": "living-room", "name": "Living Room", "url": "/home/living-room", "product_count": "250+"},
-                    {"id": "kitchen-dining", "name": "Kitchen & Dining", "url": "/home/kitchen-dining", "product_count": "200+"},
-                    {"id": "bathroom", "name": "Bathroom", "url": "/home/bathroom", "product_count": "100+"},
-                    {"id": "all", "name": "All Home", "url": "/home", "product_count": "1000+"}
-                ]
-            }
-        ],
-
-        # The Toy Shop: "Brands", "Type of Toy", "Outdoor", "Shop By Age", "Offers", "New Toys", "Clearance" : https://www.thetoyshop.com/
-        "thetoyshop": [
-            {"id": "brands", "name": "Brands", "url": "/brands", "product_count": "2000+"},
-            {"id": "type-of-toy", "name": "Type of Toy", "url": "/type-of-toy", "product_count": "3000+"},
-            {"id": "outdoor", "name": "Outdoor", "url": "/outdoor", "product_count": "500+"},
-            {"id": "shop-by-age", "name": "Shop By Age", "url": "/shop-by-age", "product_count": "2500+"},
-            {"id": "offers", "name": "Offers", "url": "/offers", "product_count": "800+"},
-            {"id": "new-toys", "name": "New Toys", "url": "/new-toys", "product_count": "600+"}
-        ],
-
-        # Costco: "Shop", "Grocery", "Same Day", "Savings", "Business Delivery", "Optical", "Pharmacy", "Services"
-        "costco": [
-            {"id": "grocery", "name": "Grocery", "url": "/grocery", "product_count": "5000+"},
-            {"id": "shop", "name": "Shop", "url": "/shop", "product_count": "8000+"},
-            {"id": "same-day", "name": "Same Day", "url": "/same-day", "product_count": "2000+"},
-            {"id": "savings", "name": "Savings", "url": "/savings", "product_count": "1500+"},
-            {"id": "business-delivery", "name": "Business Delivery", "url": "/business-delivery", "product_count": "3000+"}
-        ],
-
-        # For blocked sites (Hamleys, Selfridges), use reasonable category estimates
-        "hamleys": [
-            {"id": "action-figures", "name": "Action Figures", "url": "/action-figures", "product_count": "500+"},
-            {"id": "dolls", "name": "Dolls & Accessories", "url": "/dolls", "product_count": "400+"},
-            {"id": "educational", "name": "Educational Toys", "url": "/educational", "product_count": "600+"},
-            {"id": "outdoor", "name": "Outdoor Toys", "url": "/outdoor", "product_count": "300+"},
-            {"id": "board-games", "name": "Board Games", "url": "/board-games", "product_count": "400+"},
-            {"id": "brands", "name": "Popular Brands", "url": "/brands", "product_count": "1000+"}
-        ],
-
-        "selfridges": [
-            {"id": "women", "name": "Women", "url": "/women", "product_count": "8000+"},
-            {"id": "men", "name": "Men", "url": "/men", "product_count": "5000+"},
-            {"id": "beauty", "name": "Beauty", "url": "/beauty", "product_count": "3000+"},
-            {"id": "home", "name": "Home & Lifestyle", "url": "/home", "product_count": "2000+"},
-            {"id": "accessories", "name": "Accessories", "url": "/accessories", "product_count": "2500+"},
-            {"id": "designer", "name": "Designer", "url": "/designer", "product_count": "4000+"}
-        ]
-    }
 
     # Get categories for this specific vendor
     categories = real_categories.get(vendor_id, [])
@@ -374,14 +214,12 @@ def select_subcategories(category: Dict[str, Any]) -> List[Dict[str, Any]]:
     # Display subcategories table
     table = Table(show_header=True, header_style="bold magenta")
     table.add_column("ID", style="cyan", no_wrap=True, width=15)
-    table.add_column("Subcategory", style="green", width=25)
-    table.add_column("Products", style="yellow", width=12)
+    table.add_column("Subcategory", style="green", width=30)
 
     for subcategory in subcategories:
         table.add_row(
             subcategory["id"],
-            subcategory["name"],
-            subcategory["product_count"]
+            subcategory["name"]
         )
 
     console.print(table)
@@ -423,8 +261,7 @@ def select_categories_for_vendor(vendor_id: str, categories: List[Dict[str, Any]
     # Display categories table
     table = Table(show_header=True, header_style="bold magenta")
     table.add_column("ID", style="cyan", no_wrap=True, width=15)
-    table.add_column("Category", style="green", width=25)
-    table.add_column("Products", style="yellow", width=12)
+    table.add_column("Category", style="green", width=30)
     table.add_column("Subcategories", style="blue", width=12)
 
     for category in categories:
@@ -433,7 +270,6 @@ def select_categories_for_vendor(vendor_id: str, categories: List[Dict[str, Any]
         table.add_row(
             category["id"],
             category["name"],
-            category["product_count"],
             subcategory_indicator
         )
     
