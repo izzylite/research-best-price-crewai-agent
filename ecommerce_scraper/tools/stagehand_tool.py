@@ -2,15 +2,83 @@
 
 import time
 import json
+import asyncio
 import logging
 import hashlib
 from typing import Any, Dict, Optional
 from crewai.tools import BaseTool
-from stagehand.sync import Stagehand  # Use sync client - no async wrapper needed!
+from stagehand import Stagehand
 from stagehand.schemas import AvailableModel
 from pydantic import BaseModel, Field
 
 from ..config.settings import settings
+
+
+def run_async_safely(coro):
+    """
+    Enhanced async handling for Stagehand operations with persistent event loop support.
+    Handles nested event loop scenarios and event loop closure issues robustly.
+    """
+    import threading
+    import concurrent.futures
+
+    # Get current thread info for debugging
+    current_thread = threading.current_thread()
+    thread_name = current_thread.name
+
+    try:
+        # Check if we're in the main thread and if there's already a running loop
+        try:
+            asyncio.get_running_loop()
+            # If we have a running loop, try to use it with nest_asyncio
+            try:
+                import nest_asyncio
+                nest_asyncio.apply()
+                # Create a task in the current loop
+                return asyncio.run(coro)
+            except ImportError:
+                # Use thread executor as fallback
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    future = executor.submit(asyncio.run, coro)
+                    return future.result()
+        except RuntimeError:
+            # No running loop, try standard approach
+            return asyncio.run(coro)
+
+    except RuntimeError as e:
+        error_msg = str(e)
+
+        if "Event loop is closed" in error_msg:
+            # Event loop was closed, create a new one in a separate thread
+            print(f"⚠️ Event loop closed in thread {thread_name}, using thread executor...")
+
+            def run_in_new_loop():
+                # Create a fresh event loop in this thread
+                new_loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(new_loop)
+                try:
+                    return new_loop.run_until_complete(coro)
+                finally:
+                    new_loop.close()
+
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                future = executor.submit(run_in_new_loop)
+                return future.result()
+
+        elif "asyncio.run() cannot be called from a running event loop" in error_msg:
+            # Handle nested event loop case with nest_asyncio
+            try:
+                import nest_asyncio
+                nest_asyncio.apply()
+                return asyncio.run(coro)
+            except ImportError:
+                # Fallback: use thread executor if nest_asyncio not available
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    future = executor.submit(asyncio.run, coro)
+                    return future.result()
+        else:
+            # Re-raise other RuntimeErrors
+            raise
 
 
 class StagehandInput(BaseModel):
@@ -23,7 +91,7 @@ class StagehandInput(BaseModel):
     variables: Optional[Dict[str, str]] = Field(None, description="Variables for sensitive data substitution (e.g., {'email': 'user@example.com'})")
     preview_only: bool = Field(False, description="If True, only preview the action without executing it")
     use_cache: bool = Field(True, description="Whether to use cached results for repeated operations")
-    schema: Optional[Any] = Field(None, description="Pydantic model class for structured extraction (extract command only)")
+    extraction_schema: Optional[Any] = Field(None, description="Pydantic model class for structured extraction (extract command only)")
 
 
 class EcommerceStagehandTool(BaseTool):
@@ -43,19 +111,19 @@ class EcommerceStagehandTool(BaseTool):
     Enhanced Features:
     - Schema-based extraction: Use 'schema' parameter with Pydantic models for structured data
     - Built-in variable substitution: Pass variables directly to Stagehand (no manual substitution)
-    - Observe-then-act pattern: Preview actions before execution for better reliability
+    - Intelligent caching: Automatic caching of safe operations (extract, observe, preview)
     - Simplified async handling: Robust async/sync integration following Stagehand patterns
 
     Best Practices:
-    - Use schema parameter for structured extraction: schema=StandardizedProduct
+    - Use extraction_schema parameter for structured extraction: extraction_schema=StandardizedProduct
     - Use variables for sensitive data: variables={"email": "user@example.com"}
-    - Use observe-then-act for complex interactions
+    - Use preview command for action previewing before execution
     - Be atomic and specific in instructions
 
     Examples:
-    - Schema extraction: instruction="Extract product data", command_type="extract", schema=StandardizedProduct
+    - Schema extraction: instruction="Extract product data", command_type="extract", extraction_schema=StandardizedProduct
     - Secure action: instruction="Type %email% in email field", variables={"email": "user@example.com"}
-    - Observe-then-act: Use observe_then_act() method for reliable action execution
+    - Action preview: instruction="Find login button", command_type="preview"
     """
     args_schema: type[BaseModel] = StagehandInput
 
@@ -70,17 +138,7 @@ class EcommerceStagehandTool(BaseTool):
         if not self._logger.handlers:
             settings.setup_logging()
 
-    def _substitute_variables(self, instruction: str, variables: Optional[Dict[str, str]] = None) -> str:
-        """Substitute variables in instruction for security."""
-        if not variables or not settings.enable_variable_substitution:
-            return instruction
 
-        result = instruction
-        for key, value in variables.items():
-            placeholder = f"%{key}%"
-            result = result.replace(placeholder, value)
-
-        return result
 
     def _get_cache_key(self, instruction: str, url: Optional[str] = None, command_type: str = "act") -> str:
         """Generate cache key for operation."""
@@ -109,7 +167,7 @@ class EcommerceStagehandTool(BaseTool):
             }
 
     def _get_stagehand(self) -> Stagehand:
-        """Get or create Stagehand instance."""
+        """Get or create Stagehand instance with enhanced error handling."""
         if self._stagehand is None:
             # Determine model name from settings
             model_name = getattr(AvailableModel, settings.stagehand_model_name.upper().replace('-', '_'),
@@ -127,41 +185,66 @@ class EcommerceStagehandTool(BaseTool):
                 wait_for_captcha_solves=True,
             )
 
-            # Initialize Stagehand using sync client - no async wrapper needed!
+            # Initialize Stagehand using enhanced async wrapper
             try:
                 print("🔄 Initializing Stagehand session...")
-                self._stagehand.init()  # Direct sync call
+                run_async_safely(self._stagehand.init())
                 print("✅ Stagehand session initialized successfully")
             except Exception as e:
                 print(f"❌ Error: Failed to initialize Stagehand: {e}")
                 self._stagehand = None
                 raise
 
+        # Verify the Stagehand instance is still valid
+        try:
+            if hasattr(self._stagehand, 'page') and self._stagehand.page is None:
+                self._logger.warning("Stagehand page is None, but keeping existing session...")
+                # Don't reinitialize - just log the issue
+        except Exception as e:
+            self._logger.warning(f"Stagehand validation failed: {e}")
+            # Don't reinitialize - let the retry logic handle it
+
         return self._stagehand
-    
+
+    def _safe_async_call(self, async_func, *args, **kwargs):
+        """Safely call an async function, ensuring fresh coroutines are created."""
+        try:
+            # Create a fresh coroutine each time
+            coro = async_func(*args, **kwargs)
+            return run_async_safely(coro)
+        except Exception as e:
+            # Handle coroutine reuse errors
+            if "cannot reuse already awaited coroutine" in str(e):
+                self._logger.warning("Coroutine reuse detected, creating fresh coroutine...")
+                # Create a completely fresh coroutine
+                coro = async_func(*args, **kwargs)
+                return run_async_safely(coro)
+            else:
+                raise
+
     def _run(self, **kwargs) -> str:
         """Execute the Stagehand command with best practices."""
         try:
-            instruction = kwargs.get("instruction")
-            url = kwargs.get("url")
-            command_type = kwargs.get("command_type", "act")
-            selector = kwargs.get("selector")
-            wait_time = kwargs.get("wait_time")
-            use_cache = kwargs.get("use_cache", True)
+            # Extract parameters from kwargs and remove them to avoid conflicts
+            instruction = kwargs.pop("instruction", None)
+            url = kwargs.pop("url", None)
+            command_type = kwargs.pop("command_type", "act")
+            selector = kwargs.pop("selector", None)
+            wait_time = kwargs.pop("wait_time", None)
+            use_cache = kwargs.pop("use_cache", True)
 
             if not instruction:
                 return "Error: instruction is required"
 
-            # Handle preview command type
-            if command_type == "preview":
-                command_type = "observe"
+            # Preview command will be handled in _execute_with_retry
+            # No need to convert here
 
             # Variables will be handled by Stagehand's built-in system
             # No need for manual substitution
 
-            # Check cache first (only for extract operations to avoid side effects)
+            # Check cache first (only for safe operations that don't change state)
             cache_key = None
-            if use_cache and command_type in ["extract", "observe"]:
+            if use_cache and command_type in ["extract", "observe", "preview"]:
                 cache_key = self._get_cache_key(instruction, url, command_type)
                 cached_result = self._get_cached_result(cache_key)
                 if cached_result:
@@ -177,19 +260,25 @@ class EcommerceStagehandTool(BaseTool):
 
                 try:
                     print(f"Navigating to: {url}")
-                    stagehand.page.goto(url)  # Direct sync call
+                    # Use safe async call to avoid coroutine reuse
+                    self._safe_async_call(stagehand.page.goto, url)
                     self._current_url = url
                     print("Navigation completed")
 
                     # Auto-handle common popups after navigation
-                    self._auto_handle_popups(stagehand)
+                    # self._auto_handle_popups(stagehand)
 
                     # If this is just a navigation request, return success
                     if instruction and any(nav_word in instruction.lower() for nav_word in ['navigate', 'go to', 'visit', 'open']):
                         return f"Successfully navigated to {url}"
 
                 except Exception as e:
-                    return f"Error navigating to {url}: {str(e)}"
+                    error_msg = str(e)
+                    self._logger.error(f"Navigation error: {error_msg}")
+
+                    # Log the error but don't reinitialize to avoid creating new sessions
+                    self._logger.warning(f"Navigation failed: {error_msg}")
+                    return f"Error navigating to {url}: {error_msg}"
             
             # Wait if specified (keep this for user-requested delays)
             if wait_time:
@@ -229,13 +318,13 @@ class EcommerceStagehandTool(BaseTool):
 
                     # Use Stagehand's built-in variable substitution
                     if variables:
-                        result = stagehand.page.act(
+                        result = self._safe_async_call(stagehand.page.act,
                             action=instruction,
                             variables=variables,
                             domSettleTimeoutMs=dom_timeout
                         )
                     else:
-                        result = stagehand.page.act(instruction, domSettleTimeoutMs=dom_timeout)
+                        result = self._safe_async_call(stagehand.page.act, instruction, domSettleTimeoutMs=dom_timeout)
 
                     self._logger.info("Action completed")
                     return f"Action completed: {result}"
@@ -245,18 +334,18 @@ class EcommerceStagehandTool(BaseTool):
                     dom_timeout = 5000 if attempt > 0 else 3000
 
                     # Check if we should use structured schema extraction
-                    schema = kwargs.get("schema")
+                    schema = kwargs.get("extraction_schema")
                     if schema:
                         # Use Pydantic schema for structured extraction
                         if selector:
-                            result = stagehand.page.extract(
+                            result = self._safe_async_call(stagehand.page.extract,
                                 instruction=instruction,
                                 schema=schema,
                                 selector=selector,
                                 domSettleTimeoutMs=dom_timeout
                             )
                         else:
-                            result = stagehand.page.extract(
+                            result = self._safe_async_call(stagehand.page.extract,
                                 instruction=instruction,
                                 schema=schema,
                                 domSettleTimeoutMs=dom_timeout
@@ -270,9 +359,9 @@ class EcommerceStagehandTool(BaseTool):
                     else:
                         # Fallback to text-based extraction
                         if selector:
-                            result = stagehand.page.extract(instruction, selector=selector, domSettleTimeoutMs=dom_timeout)
+                            result = run_async_safely(stagehand.page.extract(instruction, selector=selector, domSettleTimeoutMs=dom_timeout))
                         else:
-                            result = stagehand.page.extract(instruction, domSettleTimeoutMs=dom_timeout)
+                            result = run_async_safely(stagehand.page.extract(instruction, domSettleTimeoutMs=dom_timeout))
 
                     self._logger.info("Data extracted")
                     # Try to format as JSON if possible
@@ -300,7 +389,7 @@ class EcommerceStagehandTool(BaseTool):
                     if selector:
                         observe_params["selector"] = selector
 
-                    result = stagehand.page.observe(**observe_params)
+                    result = run_async_safely(stagehand.page.observe(**observe_params))
                     self._logger.info("Elements observed")
 
                     # Format observe results for better readability
@@ -315,8 +404,36 @@ class EcommerceStagehandTool(BaseTool):
                     else:
                         return f"Observed elements: {result}"
 
+                elif command_type == "preview":
+                    # Preview is the same as observe but with explicit preview context
+                    dom_timeout = 5000 if attempt > 0 else 3000
+
+                    observe_params = {
+                        "instruction": instruction,
+                        "domSettleTimeoutMs": dom_timeout,
+                        "returnAction": True  # Always return suggested actions for preview
+                    }
+
+                    if selector:
+                        observe_params["selector"] = selector
+
+                    result = run_async_safely(stagehand.page.observe(**observe_params))
+                    self._logger.info("Action previewed")
+
+                    # Format preview results with preview-specific messaging
+                    if isinstance(result, list) and result:
+                        formatted_results = []
+                        for i, action in enumerate(result[:3]):  # Limit to top 3 for preview
+                            if isinstance(action, dict):
+                                formatted_results.append(f"{i+1}. Preview: {action.get('description', 'Unknown action')}")
+                            else:
+                                formatted_results.append(f"{i+1}. Preview: {str(action)}")
+                        return f"Action preview (top suggestions):\n" + "\n".join(formatted_results)
+                    else:
+                        return f"Action preview: {result}"
+
                 else:
-                    return f"Error: Unknown command type '{command_type}'. Use 'act', 'extract', or 'observe'."
+                    return f"Error: Unknown command type '{command_type}'. Use 'act', 'extract', 'observe', or 'preview'."
 
             except Exception as e:
                 last_error = e
@@ -330,12 +447,17 @@ class EcommerceStagehandTool(BaseTool):
                     # Try to refresh the page state using Stagehand's built-in waiting
                     try:
                         if hasattr(stagehand, 'page') and stagehand.page:
-                            stagehand.page.wait_for_load_state('networkidle', timeout=10000)
+                            run_async_safely(stagehand.page.wait_for_load_state('networkidle', timeout=10000))
                             # Only use minimal sleep for DOM stability if needed
                             time.sleep(2)
                     except:
                         # Fallback to longer wait if Stagehand wait fails
                         time.sleep(5)
+
+                elif "'NoneType' object has no attribute 'send'" in error_msg or "Page.evaluate" in error_msg:
+                    self._logger.info("Browser page connection lost - waiting before retry")
+                    # Don't reinitialize, just wait and let retry handle it
+                    time.sleep(5)
 
                 elif "Protocol error" in error_msg or "Session closed" in error_msg:
                     self._logger.info("Browser session error detected - longer wait before retry")
@@ -357,20 +479,20 @@ class EcommerceStagehandTool(BaseTool):
 
             # Try to dismiss cookie consent
             try:
-                stagehand.page.act(
+                run_async_safely(stagehand.page.act(
                     "Look for cookie consent banner or privacy dialog and click Accept All, I Accept, or Accept Cookies",
                     domSettleTimeoutMs=2000
-                )
+                ))
                 self._logger.info("Attempted cookie consent dismissal")
             except Exception as e:
                 self._logger.debug(f"Cookie consent handling failed: {e}")
 
             # Final check for any remaining overlays
             try:
-                stagehand.page.act(
+                run_async_safely(stagehand.page.act(
                     "Look for any remaining popup, modal, or overlay blocking the main content and dismiss it",
                     domSettleTimeoutMs=2000
-                )
+                ))
                 self._logger.info("Attempted general popup dismissal")
             except Exception as e:
                 self._logger.debug(f"General popup handling failed: {e}")
@@ -392,7 +514,7 @@ class EcommerceStagehandTool(BaseTool):
             return self._run(
                 instruction=instruction,
                 command_type="extract",
-                schema=StandardizedProduct,
+                extraction_schema=StandardizedProduct,
                 use_cache=True,
                 **kwargs
             )
@@ -401,58 +523,16 @@ class EcommerceStagehandTool(BaseTool):
             self._logger.error(f"Error extracting product data: {str(e)}")
             return f"Error extracting product data: {str(e)}"
 
-    def extract_with_schema(self, instruction: str, schema_class, **kwargs) -> str:
-        """
-        Generic schema-based extraction method.
 
-        Args:
-            instruction: Natural language instruction for extraction
-            schema_class: Pydantic model class for structured extraction
-            **kwargs: Additional parameters (selector, variables, etc.)
 
-        Returns:
-            JSON string of extracted structured data
-        """
-        try:
-            self._logger.info(f"Extracting data with schema: {schema_class.__name__}")
 
-            return self._run(
-                instruction=instruction,
-                command_type="extract",
-                schema=schema_class,
-                use_cache=kwargs.get("use_cache", True),
-                **kwargs
-            )
-
-        except Exception as e:
-            self._logger.error(f"Error in schema-based extraction: {str(e)}")
-            return f"Error in schema-based extraction: {str(e)}"
-
-    def extract_product_list(self, **kwargs) -> str:
-        """Extract multiple products from a listing page using ProductBatch schema."""
-        try:
-            from ..schemas.standardized_product import ProductBatch
-
-            instruction = "Extract all products from this listing page including their names, descriptions, prices, image URLs, and other available details"
-
-            return self._run(
-                instruction=instruction,
-                command_type="extract",
-                schema=ProductBatch,
-                use_cache=True,
-                **kwargs
-            )
-
-        except Exception as e:
-            self._logger.error(f"Error extracting product list: {str(e)}")
-            return f"Error extracting product list: {str(e)}"
 
     def preview_action(self, instruction: str, variables: Optional[Dict[str, str]] = None) -> str:
-        """Preview an action without executing it using observe()."""
+        """Preview an action without executing it using the preview command type."""
         try:
             return self._run(
                 instruction=instruction,
-                command_type="preview",
+                command_type="preview",  # Now properly handled in _execute_with_retry
                 variables=variables,
                 use_cache=True
             )
@@ -460,106 +540,16 @@ class EcommerceStagehandTool(BaseTool):
             self._logger.error(f"Error previewing action: {str(e)}")
             return f"Error previewing action: {str(e)}"
 
-    def observe_then_act(self, instruction: str, variables: Optional[Dict[str, str]] = None,
-                        execute_top_action: bool = True) -> str:
-        """
-        Implement observe-then-act pattern as recommended by Stagehand best practices.
 
-        Args:
-            instruction: Natural language instruction for what to observe/act on
-            variables: Variables for sensitive data substitution
-            execute_top_action: If True, execute the top suggested action automatically
 
-        Returns:
-            Result of observation and optional action execution
-        """
-        try:
-            stagehand = self._get_stagehand()
 
-            # First, observe to get action suggestions
-            self._logger.info(f"Observing elements for: {instruction[:50]}...")
-            observations = stagehand.page.observe(
-                instruction=instruction,
-                returnAction=True,
-                domSettleTimeoutMs=3000
-            )
-
-            if not observations:
-                return "No actionable elements found for the given instruction"
-
-            # Format observation results
-            observation_summary = []
-            for i, obs in enumerate(observations[:3]):  # Show top 3 observations
-                if hasattr(obs, 'description'):
-                    observation_summary.append(f"{i+1}. {obs.description}")
-                else:
-                    observation_summary.append(f"{i+1}. {str(obs)}")
-
-            result = f"Observed elements:\n" + "\n".join(observation_summary)
-
-            # Execute the top action if requested
-            if execute_top_action and observations:
-                self._logger.info("Executing top suggested action...")
-                top_action = observations[0]
-
-                # Execute the observed action directly (no LLM inference needed)
-                if variables:
-                    action_result = stagehand.page.act(
-                        top_action,
-                        variables=variables
-                    )
-                else:
-                    action_result = stagehand.page.act(top_action)
-
-                result += f"\n\nExecuted action: {action_result}"
-
-            return result
-
-        except Exception as e:
-            self._logger.error(f"Error in observe-then-act: {str(e)}")
-            return f"Error in observe-then-act: {str(e)}"
-
-    def execute_observed_action(self, action_dict: Dict[str, Any], variables: Optional[Dict[str, str]] = None) -> str:
-        """Execute a previously observed action with variable substitution."""
-        try:
-            if not isinstance(action_dict, dict) or 'method' not in action_dict:
-                return "Error: Invalid action dictionary. Must contain 'method' key."
-
-            # Build instruction from action dictionary
-            method = action_dict.get('method', '')
-            description = action_dict.get('description', '')
-            arguments = action_dict.get('arguments', [])
-
-            if variables and arguments:
-                # Substitute variables in arguments
-                substituted_args = []
-                for arg in arguments:
-                    if isinstance(arg, str):
-                        substituted_args.append(self._substitute_variables(arg, variables))
-                    else:
-                        substituted_args.append(arg)
-                arguments = substituted_args
-
-            instruction = f"{method.title()} on {description}"
-            if arguments:
-                instruction += f" with arguments: {arguments}"
-
-            return self._run(
-                instruction=instruction,
-                command_type="act",
-                variables=variables
-            )
-
-        except Exception as e:
-            self._logger.error(f"Error executing observed action: {str(e)}")
-            return f"Error executing observed action: {str(e)}"
 
     def close(self):
         """Close the Stagehand session and cleanup resources."""
         if self._stagehand:
             try:
                 self._logger.info("Closing Browserbase session...")
-                self._stagehand.close()  # Direct sync call
+                run_async_safely(self._stagehand.close())
                 self._logger.info("Browserbase session closed successfully")
             except Exception as e:
                 self._logger.warning(f"⚠️ Warning: Error closing Stagehand session: {e}")
@@ -597,10 +587,7 @@ class EcommerceStagehandTool(BaseTool):
             "settings": settings.get_safe_config()
         }
 
-    def clear_cache(self) -> None:
-        """Manually clear the cache."""
-        self._cache.clear()
-        self._logger.info("Cache manually cleared")
+
 
     def get_cache_stats(self) -> Dict[str, Any]:
         """Get cache statistics."""
