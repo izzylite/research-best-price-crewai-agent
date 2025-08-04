@@ -18,9 +18,9 @@ from stagehand.schemas import AvailableModel
 
 # This will fail on extraction operations
 stagehand_tool = StagehandTool(
-    api_key="bb_live_...",
-    project_id="...",
-    model_api_key="sk-proj-...",  # ❌ This parameter is not forwarded properly
+    api_key="your_browserbase_api_key",
+    project_id="your_project_id",
+    model_api_key="your_openai_api_key",  # ❌ This parameter is not forwarded properly
     model_name=AvailableModel.GPT_4O,
     headless=True
 )
@@ -77,9 +77,9 @@ from ecommerce_scraper.tools.stagehand_tool import EcommerceStagehandTool
 
 # This works correctly ✅
 tool = EcommerceStagehandTool(
-    api_key="bb_live_...",
-    project_id="...",
-    model_api_key="sk-proj-..."
+    api_key="your_browserbase_api_key",
+    project_id="your_project_id",
+    model_api_key="your_openai_api_key"
 )
 ```
 
