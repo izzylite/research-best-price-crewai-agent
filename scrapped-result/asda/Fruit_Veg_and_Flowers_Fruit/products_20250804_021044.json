@@ -1,0 +1,25 @@
+{
+  "scraping_info": {
+    "vendor": "asda",
+    "category": "Fruit, Veg & Flowers > Fruit",
+    "scraped_at": "2025-08-04T02:10:44.750143",
+    "session_id": "category_20250804_021044",
+    "total_products": 1,
+    "success": true
+  },
+  "products": [
+    {
+      "name": "ASDA Cantaloupe Melon",
+      "description": "A sweet and juicy cantaloupe melon.",
+      "price": {
+        "amount": 2.5,
+        "currency": "GBP"
+      },
+      "image_url": "https://example.com/melon.jpg",
+      "weight": "1 kg",
+      "category": "Fruit, Veg & Flowers > Fruit",
+      "vendor": "asda",
+      "scraped_at": "2023-10-04T02:07:48+00:00"
+    }
+  ]
+}

@@ -4,6 +4,7 @@ import json
 import os
 import logging
 from datetime import datetime
+from pathlib import Path
 from typing import List, Optional, Dict, Any, Union
 
 # Load settings first to get API keys
@@ -322,6 +323,9 @@ class EcommerceScraper:
         """
         Parse CrewAI result into StandardizedProduct objects.
 
+        Since DataValidatorAgent is responsible for standardization,
+        this method only does simple extraction and validation.
+
         Args:
             crew_result: Result from CrewAI crew execution
 
@@ -331,139 +335,73 @@ class EcommerceScraper:
         products = []
 
         try:
-            # First, try to access task results if available
+            # Debug: Print crew result structure
+            if self.verbose:
+                self.console.print(f"[dim]DEBUG: crew_result type: {type(crew_result)}[/dim]")
+                if hasattr(crew_result, 'tasks_output'):
+                    self.console.print(f"[dim]DEBUG: tasks_output length: {len(crew_result.tasks_output) if crew_result.tasks_output else 0}[/dim]")
+
+            # Get the validation result from the final task
             if hasattr(crew_result, 'tasks_output') and crew_result.tasks_output:
+                # Get the last task output (validation task)
+                validation_output = crew_result.tasks_output[-1]
+
                 if self.verbose:
-                    self.console.print("[dim]Checking task outputs for product data...[/dim]")
+                    self.console.print(f"[dim]DEBUG: validation_output type: {type(validation_output)}[/dim]")
+                    self.console.print(f"[dim]DEBUG: validation_output attributes: {dir(validation_output)}[/dim]")
 
-                # Look through task outputs for product data
-                for task_output in crew_result.tasks_output:
-                    if hasattr(task_output, 'raw'):
-                        task_data = task_output.raw
-                        products_from_task = self._extract_products_from_data(task_data)
-                        if products_from_task:
-                            products.extend(products_from_task)
-                            if self.verbose:
-                                self.console.print(f"[dim]Found {len(products_from_task)} products in task output[/dim]")
-
-                if products:
-                    return products
-
-            # Extract result data from main result
-            if hasattr(crew_result, 'raw'):
-                result_data = crew_result.raw
-            elif hasattr(crew_result, 'json'):
-                result_data = crew_result.json
-            else:
-                result_data = str(crew_result)
-
-            # Try to parse as JSON if it's a string
-            if isinstance(result_data, str):
-                try:
-                    import json
-                    parsed_data = json.loads(result_data)
-                    result_data = parsed_data
-                except (json.JSONDecodeError, ValueError):
-                    # If parsing fails, try to extract products from text
+                if hasattr(validation_output, 'json_dict') and validation_output.json_dict:
+                    result_data = validation_output.json_dict
                     if self.verbose:
-                        self.console.print("[dim]Warning: Could not parse result as JSON, attempting text extraction[/dim]")
-                    return []
+                        self.console.print(f"[dim]DEBUG: Using json_dict: {type(result_data)}[/dim]")
+                elif hasattr(validation_output, 'raw'):
+                    result_data = validation_output.raw
+                    if self.verbose:
+                        self.console.print(f"[dim]DEBUG: Using raw data: {type(result_data)}[/dim]")
+                        self.console.print(f"[dim]DEBUG: Raw data preview: {str(result_data)[:200]}...[/dim]")
 
-            # Convert to StandardizedProduct objects
-            if isinstance(result_data, list):
-                for item in result_data:
-                    if isinstance(item, dict):
+                    # Try to parse as JSON if it's a string
+                    if isinstance(result_data, str):
                         try:
-                            product = StandardizedProduct(**item)
-                            products.append(product)
-                        except Exception as e:
+                            import json
+                            result_data = json.loads(result_data)
                             if self.verbose:
-                                self.console.print(f"[dim]Warning: Could not create StandardizedProduct from {item}: {e}[/dim]")
-            elif isinstance(result_data, dict):
-                # Check if this is a validation result with validated_products key
-                if 'validated_products' in result_data:
-                    validated_products = result_data['validated_products']
-                    if isinstance(validated_products, list):
-                        for item in validated_products:
-                            if isinstance(item, dict):
-                                try:
-                                    product = StandardizedProduct(**item)
-                                    products.append(product)
-                                except Exception as e:
-                                    if self.verbose:
-                                        self.console.print(f"[dim]Warning: Could not create StandardizedProduct from {item}: {e}[/dim]")
+                                self.console.print(f"[dim]DEBUG: Successfully parsed JSON[/dim]")
+                        except (json.JSONDecodeError, ValueError):
+                            if self.verbose:
+                                self.console.print("[dim]Warning: Could not parse validation result as JSON[/dim]")
+                            return []
                 else:
-                    # Single product result
-                    try:
-                        product = StandardizedProduct(**result_data)
-                        products.append(product)
-                    except Exception as e:
-                        if self.verbose:
-                            self.console.print(f"[dim]Warning: Could not create StandardizedProduct from result: {e}[/dim]")
+                    if self.verbose:
+                        self.console.print("[dim]DEBUG: No json_dict or raw data found[/dim]")
+                    return []
+            else:
+                if self.verbose:
+                    self.console.print("[dim]DEBUG: No tasks_output found[/dim]")
+                return []
+
+            # Extract validated_products from the result
+            if isinstance(result_data, dict) and 'validated_products' in result_data:
+                validated_products = result_data['validated_products']
+                if isinstance(validated_products, list):
+                    for item in validated_products:
+                        if isinstance(item, dict):
+                            try:
+                                # Simple validation - DataValidatorAgent should have done the standardization
+                                product = StandardizedProduct(**item)
+                                products.append(product)
+                            except Exception as e:
+                                if self.verbose:
+                                    self.console.print(f"[yellow]Warning: DataValidatorAgent failed to standardize product: {e}[/yellow]")
+                                # Skip invalid products - DataValidatorAgent failed to standardize properly
 
         except Exception as e:
             if self.verbose:
-                self.console.print(f"[dim]Warning: Error parsing crew result: {e}[/dim]")
+                self.console.print(f"[red]Error parsing crew result: {e}[/red]")
 
         return products
 
-    def _extract_products_from_data(self, data: Any) -> List[StandardizedProduct]:
-        """Extract StandardizedProduct objects from various data formats."""
-        products = []
 
-        try:
-            # Try to parse as JSON if it's a string
-            if isinstance(data, str):
-                try:
-                    import json
-                    data = json.loads(data)
-                except (json.JSONDecodeError, ValueError):
-                    return []
-
-            # Handle different data structures
-            if isinstance(data, list):
-                for item in data:
-                    if isinstance(item, dict):
-                        try:
-                            product = StandardizedProduct(**item)
-                            products.append(product)
-                        except Exception:
-                            pass  # Skip invalid products - DataValidatorAgent failed to standardize
-            elif isinstance(data, dict):
-                # Check for validated_products key
-                if 'validated_products' in data:
-                    validated_products = data['validated_products']
-                    if isinstance(validated_products, list):
-                        for item in validated_products:
-                            if isinstance(item, dict):
-                                try:
-                                    product = StandardizedProduct(**item)
-                                    products.append(product)
-                                except Exception:
-                                    pass  # Skip invalid products - DataValidatorAgent failed to standardize
-                # Check for products key
-                elif 'products' in data:
-                    products_data = data['products']
-                    if isinstance(products_data, list):
-                        for item in products_data:
-                            if isinstance(item, dict):
-                                try:
-                                    product = StandardizedProduct(**item)
-                                    products.append(product)
-                                except Exception:
-                                    pass  # Skip invalid products - DataValidatorAgent failed to standardize
-                # Single product
-                else:
-                    try:
-                        product = StandardizedProduct(**data)
-                        products.append(product)
-                    except Exception:
-                        pass  # Skip invalid product - DataValidatorAgent failed to standardize
-
-        except Exception:
-            pass  # Return empty list on any error
-
-        return products
 
     def scrape_vendor_category(self,
                              vendor: str,
@@ -852,6 +790,66 @@ class EcommerceScraper:
     def __exit__(self, exc_type, exc_val, exc_tb):
         """Context manager exit."""
         self.close()
+        return False
+
+    def save_results_to_directory(self, result, vendor: str, category_name: str) -> Optional[Path]:
+        """
+        Save scraped results to organized directory structure.
+
+        Directory structure: scrapped-result/vendor/category/
+
+        Args:
+            result: DynamicScrapingResult object
+            vendor: Vendor name (e.g., 'asda')
+            category_name: Category name (e.g., 'Fruit, Veg & Flowers > Fruit')
+
+        Returns:
+            Path to saved file or None if no products to save
+        """
+        if not result.products:
+            logger.info("No products to save")
+            return None
+
+        # Create directory structure: scrapped-result/vendor/category/
+        base_dir = Path("scrapped-result")
+        vendor_dir = base_dir / vendor.lower()
+
+        # Clean category name for directory (remove special characters)
+        clean_category = category_name.replace(" > ", "_").replace(" ", "_").replace(",", "").replace("&", "and")
+        category_dir = vendor_dir / clean_category
+
+        # Create directories if they don't exist
+        category_dir.mkdir(parents=True, exist_ok=True)
+
+        # Create filename with timestamp
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"products_{timestamp}.json"
+        filepath = category_dir / filename
+
+        # Convert products to dictionaries and save
+        products_data = {
+            "scraping_info": {
+                "vendor": vendor,
+                "category": category_name,
+                "scraped_at": datetime.now().isoformat(),
+                "session_id": result.session_id,
+                "total_products": len(result.products),
+                "success": result.success
+            },
+            "products": [product.to_dict() for product in result.products]
+        }
+
+        try:
+            with open(filepath, 'w', encoding='utf-8') as f:
+                json.dump(products_data, f, indent=2, ensure_ascii=False)
+
+            logger.info(f"Results saved to: {filepath}")
+            logger.info(f"Saved {len(result.products)} products")
+            return filepath
+
+        except Exception as e:
+            logger.error(f"Failed to save results: {e}")
+            return None
 
 
 # Convenience functions for quick usage
