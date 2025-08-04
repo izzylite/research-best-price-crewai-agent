@@ -12,6 +12,32 @@ from pathlib import Path
 from datetime import datetime
 from ecommerce_scraper.main import EcommerceScraper
 
+# Global flag for graceful termination
+_termination_requested = False
+_scraper_instance = None
+
+def signal_handler(signum, frame):
+    """Handle Ctrl+C (SIGINT) gracefully."""
+    global _termination_requested, _scraper_instance
+    print("\n🛑 Termination requested (Ctrl+C detected)...")
+    _termination_requested = True
+
+    # Try to gracefully close the scraper if it exists
+    if _scraper_instance:
+        try:
+            print("🔄 Attempting to close scraper gracefully...")
+            _scraper_instance.close()
+            print("✅ Scraper closed successfully")
+        except Exception as e:
+            print(f"⚠️ Error closing scraper: {e}")
+
+    print("👋 Exiting gracefully...")
+    sys.exit(0)
+
+def check_termination():
+    """Check if termination was requested."""
+    return _termination_requested
+
 def save_results_to_directory(result, vendor, category_name):
     """Save scraped results to organized directory structure."""
     if not result.products:

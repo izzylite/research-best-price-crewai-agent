@@ -96,27 +96,27 @@
       {
         "id": 1,
         "name": "Fruit",
-        "url": "https://groceries.asda.com/dept/fruit-veg-salad/fruit/1215686352935-910000975210"
+        "url": "https://groceries.asda.com/aisle/fruit-veg-flowers/fruit/view-all-fruit/1215686352935-910000975210-1215666947025"
       },
       {
         "id": 2,
         "name": "Vegetables & Potatoes",
-        "url": "https://groceries.asda.com/dept/fruit-veg-salad/vegetables-potatoes/1215686352935-1215665891579"
+        "url": "https://groceries.asda.com/aisle/fruit-veg-flowers/vegetables-potatoes/view-all-vegetables-potatoes/1215686352935-1215665891579-1215686354635"
       },
       {
         "id": 3,
         "name": "Salads & Stir Fry",
-        "url": "https://groceries.asda.com/dept/fruit-veg-flowers/salads-stir-fry/1215686352935-1215665891619"
+        "url": "https://groceries.asda.com/aisle/fruit-veg-flowers/salads-stir-fry/view-all-salads-stir-fry/1215686352935-1215665891619-1215686354639"
       },
       {
         "id": 4,
         "name": "Flowers",
-        "url": "https://groceries.asda.com/dept/fruit-veg-flowers/flowers/1215686352935-1215686353889"
+        "url": "https://groceries.asda.com/aisle/fruit-veg-flowers/flowers/flowers/1215686352935-1215686353889-910000975456"
       },
       {
         "id": 5,
         "name": "Nuts, Seeds & Dried Fruit",
-        "url": "https://groceries.asda.com/dept/fruit-veg-flowers/raw-nuts-seeds-dried-fruit/1215686352935-1215686353950"
+        "url": "https://groceries.asda.com/aisle/fruit-veg-flowers/raw-nuts-seeds-dried-fruit/view-all-raw-nuts-seeds-dried-fruit/1215686352935-1215686353950-1215686355742"
       }
     ]
   },
