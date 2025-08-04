@@ -1,7 +1,14 @@
 """Data validation agent specialized in cleaning and validating extracted product data."""
 
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from crewai import Agent, LLM
+from pydantic import BaseModel
+
+
+class ValidationResult(BaseModel):
+    """Pydantic model for validation task output."""
+    validated_products: List[Dict[str, Any]]
+    validation_summary: Dict[str, Any]
 
 
 class DataValidatorAgent:
@@ -60,20 +67,26 @@ class DataValidatorAgent:
         VALIDATION REQUIREMENTS:
         Validate each product against the StandardizedProduct schema:
 
-        REQUIRED FIELDS (must be present and valid):
+        CRITICAL: You MUST convert all data to exact StandardizedProduct schema format:
+
+        REQUIRED STANDARDIZATION CONVERSIONS:
+        - price.current → price.amount (required field)
+        - price.original → ignore (not in StandardizedProduct schema)
+        - price.discount_percentage → ignore (not in StandardizedProduct schema)
+        - Any other price fields → convert to price.amount
+
+        REQUIRED FIELDS (exact StandardizedProduct schema):
         - name: Non-empty string, min 1 character
         - description: Non-empty string, min 1 character
-        - price.current: Valid float/number > 0
+        - price.amount: Valid float/number > 0 (converted from price.current)
         - price.currency: Must be "GBP" for UK retailers
         - image_url: Valid URL format
         - category: Must match provided category "{category}"
         - vendor: Must match provided vendor "{vendor}"
         - scraped_at: Valid ISO timestamp
 
-        OPTIONAL FIELDS (validate if present):
-        - price.original: Valid float/number > price.current
-        - price.discount_percentage: Valid percentage (0-100)
-        - weight: Valid weight string with units
+        OPTIONAL FIELDS (exact StandardizedProduct schema):
+        - weight: Valid weight string with units (null if not available)
 
         VALIDATION ACTIONS:
         1. Check all required fields are present and valid
@@ -87,13 +100,19 @@ class DataValidatorAgent:
         9. Ensure category and vendor consistency
         10. Generate validation report with statistics
 
-        CLEANING RULES:
-        - Trim whitespace from all text fields
-        - Normalize price formats (remove currency symbols, convert to float)
-        - Validate and fix image URLs
-        - Standardize weight units (g, kg, ml, l)
-        - Remove HTML tags from descriptions
-        - Ensure consistent category naming
+        STANDARDIZATION RULES (CRITICAL - MUST FOLLOW EXACTLY):
+        1. Convert price.current to price.amount (required)
+        2. Remove any non-StandardizedProduct price fields (original, discount_percentage, etc.)
+        3. Ensure price object only has: {{amount: number, currency: string}}
+        4. Trim whitespace from all text fields
+        5. Validate and fix image URLs
+        6. Standardize weight units (g, kg, ml, l) or set to null
+        7. Remove HTML tags from descriptions
+        8. Ensure exact schema compliance
+
+        VALIDATION FAILURE HANDLING:
+        If the output fails StandardizedProduct validation, you MUST retry with corrections.
+        The final output MUST pass StandardizedProduct(**item) validation.
         """
 
         return Task(
@@ -101,7 +120,17 @@ class DataValidatorAgent:
             agent=self.agent,
             expected_output="""
             A validation result containing:
-            - validated_products: Array of clean StandardizedProduct objects
+            - validated_products: Array of StandardizedProduct objects with EXACT schema:
+              [{{
+                "name": "string",
+                "description": "string",
+                "price": {{"amount": number, "currency": "string"}},
+                "image_url": "string",
+                "category": "string",
+                "vendor": "string",
+                "scraped_at": "ISO timestamp",
+                "weight": "string or null"
+              }}]
             - validation_summary: {{
                 "total_input": number of input products,
                 "valid_products": number of products that passed validation,
@@ -111,7 +140,11 @@ class DataValidatorAgent:
                 "category": category name,
                 "session_id": session identifier
             }}
-            """
+
+            CRITICAL: Each product in validated_products MUST pass StandardizedProduct(**product) validation.
+            If validation fails, retry with corrections until it passes.
+            """,
+            output_json=ValidationResult
         )
 
     def create_validation_task(self, validation_level: str = "comprehensive"):

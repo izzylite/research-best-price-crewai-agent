@@ -1,0 +1,32 @@
+[
+  {
+    "id": 1,
+    "name": "Women",
+    "url": "/women"
+  },
+  {
+    "id": 2,
+    "name": "Men",
+    "url": "/men"
+  },
+  {
+    "id": 3,
+    "name": "Beauty",
+    "url": "/beauty"
+  },
+  {
+    "id": 4,
+    "name": "Home & Lifestyle",
+    "url": "/home"
+  },
+  {
+    "id": 5,
+    "name": "Accessories",
+    "url": "/accessories"
+  },
+  {
+    "id": 6,
+    "name": "Designer",
+    "url": "/designer"
+  }
+]

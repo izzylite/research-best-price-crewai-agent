@@ -1,0 +1,112 @@
+[
+  {
+    "id": 1,
+    "name": "View all Groceries",
+    "url": "/groceries/view-all"
+  },
+  {
+    "id": 2,
+    "name": "Groceries OFFERS",
+    "url": "/groceries/offers"
+  },
+  {
+    "id": 3,
+    "name": "Summer",
+    "url": "/groceries/summer"
+  },
+  {
+    "id": 4,
+    "name": "Fresh & Chilled",
+    "url": "/groceries/fresh-chilled"
+  },
+  {
+    "id": 5,
+    "name": "Frozen",
+    "url": "/groceries/frozen"
+  },
+  {
+    "id": 6,
+    "name": "Bakery",
+    "url": "/groceries/bakery"
+  },
+  {
+    "id": 7,
+    "name": "Food Cupboard",
+    "url": "/groceries/food-cupboard"
+  },
+  {
+    "id": 8,
+    "name": "Beer, Wine & Spirits",
+    "url": "/groceries/beer-wine-spirits"
+  },
+  {
+    "id": 9,
+    "name": "Tea, Coffee & Soft Drinks",
+    "url": "/groceries/tea-coffee-soft-drinks"
+  },
+  {
+    "id": 10,
+    "name": "Household",
+    "url": "/groceries/household"
+  },
+  {
+    "id": 11,
+    "name": "Toiletries, Health & Beauty",
+    "url": "/groceries/toiletries-health-beauty"
+  },
+  {
+    "id": 12,
+    "name": "Baby & Toddler",
+    "url": "/groceries/baby-toddler"
+  },
+  {
+    "id": 13,
+    "name": "Pet",
+    "url": "/groceries/pet"
+  },
+  {
+    "id": 14,
+    "name": "Home",
+    "url": "/groceries/home"
+  },
+  {
+    "id": 15,
+    "name": "New",
+    "url": "/groceries/new"
+  },
+  {
+    "id": 16,
+    "name": "Dietary & Lifestyle",
+    "url": "/groceries/dietary-lifestyle"
+  },
+  {
+    "id": 17,
+    "name": "Organic Shop",
+    "url": "/groceries/organic-shop"
+  },
+  {
+    "id": 18,
+    "name": "Shop by Occasion",
+    "url": "/groceries/shop-by-occasion"
+  },
+  {
+    "id": 19,
+    "name": "Waitrose Brands",
+    "url": "/groceries/waitrose-brands"
+  },
+  {
+    "id": 20,
+    "name": "BrandHub New",
+    "url": "/groceries/brandhub-new"
+  },
+  {
+    "id": 21,
+    "name": "Everyday Value",
+    "url": "/groceries/everyday-value"
+  },
+  {
+    "id": 22,
+    "name": "Best of British",
+    "url": "/groceries/best-of-british"
+  }
+]

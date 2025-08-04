@@ -58,12 +58,14 @@ class ProductScraperAgent:
 
         self.agent = Agent(**agent_config)
 
-    def create_multi_vendor_scraping_task(self,
-                                        vendor: str,
-                                        category: str,
-                                        session_id: str,
-                                        max_pages: Optional[int] = None):
-        """Create a task for scraping products from a specific vendor and category."""
+   
+    def create_direct_category_scraping_task(self,
+                                           vendor: str,
+                                           category: str,
+                                           category_url: str,
+                                           session_id: str,
+                                           max_pages: Optional[int] = None):
+        """Create a task for scraping products from a specific category URL."""
         from crewai import Task
 
         # Get vendor-specific configuration
@@ -72,16 +74,16 @@ class ProductScraperAgent:
             raise ValueError(f"No configuration found for vendor: {vendor}")
 
         task_description = f"""
-        Scrape products from {vendor} in the {category} category using standardized data extraction.
+        Scrape products from {category_url} using standardized data extraction.
 
         Vendor: {vendor}
         Category: {category}
         Session ID: {session_id}
         Max Pages: {max_pages or 'unlimited'}
-        Base URL: {site_config.base_url}
+        Direct Category URL: {category_url}
 
         CRITICAL REQUIREMENTS:
-        1. Use the Web Automation Tool (Stagehand) to navigate the real website
+        1. Use the Web Automation Tool (Stagehand) to navigate directly to the category URL: {category_url}
         2. Extract data using the StandardizedProduct schema format
         3. Report progress to the progress tracker if available
         4. Handle vendor-specific navigation patterns and anti-bot measures
@@ -106,11 +108,10 @@ class ProductScraperAgent:
         }}
 
         Handle pagination by:
-        1. Starting from the category page
-        2. Extracting products from current page
-        3. Navigating to next page if available and within max_pages limit
-        4. Continuing until no more pages or max_pages reached
-        5. Saving state after each page for resume capability
+        1. Extracting products from current page
+        2. Navigating to next page if available and within max_pages limit
+        3. Continuing until no more pages or max_pages reached
+        4. Saving state after each page for resume capability
         """
 
         return Task(

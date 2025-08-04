@@ -1,0 +1,57 @@
+[
+  {
+    "id": 1,
+    "name": "Sale",
+    "url": "/sale"
+  },
+  {
+    "id": 2,
+    "name": "Pushchairs",
+    "url": "/pushchairs"
+  },
+  {
+    "id": 3,
+    "name": "Furniture",
+    "url": "/furniture"
+  },
+  {
+    "id": 4,
+    "name": "Clothing",
+    "url": "/clothing"
+  },
+  {
+    "id": 5,
+    "name": "Nursery",
+    "url": "/nursery"
+  },
+  {
+    "id": 6,
+    "name": "Car Seats",
+    "url": "/car-seats"
+  },
+  {
+    "id": 7,
+    "name": "Bathing & Changing",
+    "url": "/bathing-changing"
+  },
+  {
+    "id": 8,
+    "name": "Baby Safety",
+    "url": "/baby-safety"
+  },
+  {
+    "id": 9,
+    "name": "Feeding & Weaning",
+    "url": "/feeding-weaning"
+  },
+  {
+    "id": 10,
+    "name": "Toys & Gifts",
+    "url": "/toys-gifts"
+  },
+  {
+    "id": 11,
+    "name": "Brands",
+    "url": "/brands"
+  }
+]

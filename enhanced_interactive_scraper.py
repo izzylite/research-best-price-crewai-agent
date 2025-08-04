@@ -1,23 +1,19 @@
 #!/usr/bin/env python3
 """Enhanced interactive CLI for multi-vendor ecommerce scraping with category discovery."""
 
-import sys
 import json
 import os
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
 from datetime import datetime
 from pathlib import Path
 
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
-from rich.prompt import Prompt, Confirm, IntPrompt
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
-from rich.columns import Columns
-from rich.text import Text
+from rich.prompt import Prompt, Confirm
+from rich.progress import Progress, SpinnerColumn, TextColumn
 
 # Import our scraper components
-from ecommerce_scraper.main import EcommerceScraper
 from ecommerce_scraper.config.settings import settings
 from ecommerce_scraper.config.sites import get_site_config_by_vendor, get_supported_uk_vendors
 from ecommerce_scraper.state.state_manager import StateManager, PaginationState
@@ -110,10 +106,13 @@ Welcome to the comprehensive UK retail scraping system!
 
 This tool will help you:
 • Select from 10 major UK retail websites
-• Discover available product categories dynamically  
+• Discover available product categories dynamically
 • Choose scraping scope (recent vs complete)
 • Track progress with resume functionality
 • Export standardized JSON data
+
+[green]🔍 AI Activity Logging: All agent thoughts and tool calls will be logged for debugging[/green]
+[cyan]📁 View logs with: python view_logs.py[/cyan]
 
 [yellow]⚠️  Please ensure you have valid API keys configured in your .env file[/yellow]""",
         title="🤖 Scraper Assistant v2.0",
@@ -175,12 +174,12 @@ def discover_categories_for_vendor(vendor_id: str) -> List[Dict[str, Any]]:
     vendor_info = UK_VENDORS[vendor_id]
     console.print(f"\n[blue]🔍 Loading categories for {vendor_info['name']}...[/blue]")
 
-    # Load categories from JSON file
-    categories_file = Path(__file__).parent / "categories.json"
+    # Load categories from vendor-specific JSON file
+    categories_file = Path(__file__).parent / "categories" / f"{vendor_id}.json"
 
     try:
         with open(categories_file, 'r', encoding='utf-8') as f:
-            real_categories = json.load(f)
+            categories = json.load(f)
     except FileNotFoundError:
         console.print(f"[red]❌ Categories file not found: {categories_file}[/red]")
         return []
@@ -190,10 +189,6 @@ def discover_categories_for_vendor(vendor_id: str) -> List[Dict[str, Any]]:
     except Exception as e:
         console.print(f"[red]❌ Error loading categories: {e}[/red]")
         return []
-
-
-    # Get categories for this specific vendor
-    categories = real_categories.get(vendor_id, [])
 
     if not categories:
         console.print(f"[yellow]⚠️ No categories found for {vendor_info['name']}[/yellow]")
@@ -218,7 +213,7 @@ def select_subcategories(category: Dict[str, Any]) -> List[Dict[str, Any]]:
 
     for subcategory in subcategories:
         table.add_row(
-            subcategory["id"],
+            str(subcategory["id"]),
             subcategory["name"]
         )
 
@@ -235,13 +230,18 @@ def select_subcategories(category: Dict[str, Any]) -> List[Dict[str, Any]]:
             return subcategories
 
         # Parse and validate subcategory selection
-        selected_subcategory_ids = [c.strip().lower() for c in subcategory_input.split(",")]
+        try:
+            selected_subcategory_ids = [int(c.strip()) for c in subcategory_input.split(",")]
+        except ValueError:
+            console.print(f"[red]❌ Invalid input. Please enter numeric IDs separated by commas.[/red]")
+            continue
+
         valid_subcategory_ids = [subcat["id"] for subcat in subcategories]
         invalid_subcategories = [c for c in selected_subcategory_ids if c not in valid_subcategory_ids]
 
         if invalid_subcategories:
-            console.print(f"[red]❌ Invalid subcategory IDs: {', '.join(invalid_subcategories)}[/red]")
-            console.print(f"[yellow]Valid options: {', '.join(valid_subcategory_ids)}[/yellow]")
+            console.print(f"[red]❌ Invalid subcategory IDs: {', '.join(map(str, invalid_subcategories))}[/red]")
+            console.print(f"[yellow]Valid options: {', '.join(map(str, valid_subcategory_ids))}[/yellow]")
             continue
 
         # Get selected subcategories
@@ -268,7 +268,7 @@ def select_categories_for_vendor(vendor_id: str, categories: List[Dict[str, Any]
         has_subcategories = "subcategories" in category and category["subcategories"]
         subcategory_indicator = "📁 Yes" if has_subcategories else "No"
         table.add_row(
-            category["id"],
+            str(category["id"]),
             category["name"],
             subcategory_indicator
         )
@@ -287,13 +287,18 @@ def select_categories_for_vendor(vendor_id: str, categories: List[Dict[str, Any]
             return [cat["id"] for cat in categories]
         
         # Parse and validate category selection
-        selected_categories = [c.strip().lower() for c in category_input.split(",")]
+        try:
+            selected_categories = [int(c.strip()) for c in category_input.split(",")]
+        except ValueError:
+            console.print(f"[red]❌ Invalid input. Please enter numeric IDs separated by commas.[/red]")
+            continue
+
         valid_category_ids = [cat["id"] for cat in categories]
         invalid_categories = [c for c in selected_categories if c not in valid_category_ids]
         
         if invalid_categories:
-            console.print(f"[red]❌ Invalid category IDs: {', '.join(invalid_categories)}[/red]")
-            console.print(f"[yellow]Valid options: {', '.join(valid_category_ids)}[/yellow]")
+            console.print(f"[red]❌ Invalid category IDs: {', '.join(map(str, invalid_categories))}[/red]")
+            console.print(f"[yellow]Valid options: {', '.join(map(str, valid_category_ids))}[/yellow]")
             continue
             
         # Confirm selection
@@ -333,7 +338,7 @@ def select_scraping_scope() -> str:
     
     return scope
 
-def create_scraping_plan(vendors: List[str], vendor_categories: Dict[str, List[str]], scope: str) -> Dict[str, Any]:
+def create_scraping_plan(vendors: List[str], vendor_categories: Dict[str, List[Dict]], scope: str) -> Dict[str, Any]:
     """Create a comprehensive scraping plan based on user selections."""
     plan = {
         "session_id": f"scraping_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
@@ -341,65 +346,225 @@ def create_scraping_plan(vendors: List[str], vendor_categories: Dict[str, List[s
         "scope": scope,
         "vendors": {},
         "total_estimated_products": 0,
-        "estimated_duration_minutes": 0
+        "estimated_duration_minutes": 0,
+        "total_urls": 0
     }
-    
+
+    # Extract URLs to get accurate counts
+    scraping_urls = extract_urls_from_selections(vendors, vendor_categories)
+
+    # Group URLs by vendor for planning
+    vendor_url_counts = {}
+    for url_info in scraping_urls:
+        vendor_id = url_info["vendor"]
+        if vendor_id not in vendor_url_counts:
+            vendor_url_counts[vendor_id] = 0
+        vendor_url_counts[vendor_id] += 1
+
     for vendor_id in vendors:
         vendor_info = UK_VENDORS[vendor_id]
         categories = vendor_categories[vendor_id]
-        
-        # Estimate products per category (mock calculation)
-        estimated_products_per_category = 50 if scope == "recent" else 200
-        total_vendor_products = len(categories) * estimated_products_per_category
-        
+        url_count = vendor_url_counts.get(vendor_id, 0)
+
+        # Estimate products per URL (more realistic)
+        estimated_products_per_url = 25 if scope == "recent" else 100
+        total_vendor_products = url_count * estimated_products_per_url
+
         plan["vendors"][vendor_id] = {
             "name": vendor_info["name"],
             "url": vendor_info["url"],
-            "categories": categories,
+            "categories": [cat["name"] for cat in categories],
+            "url_count": url_count,
             "estimated_products": total_vendor_products
         }
-        
+
         plan["total_estimated_products"] += total_vendor_products
-    
-    # Estimate duration (rough calculation: 30 seconds per product)
-    plan["estimated_duration_minutes"] = (plan["total_estimated_products"] * 30) // 60
-    
+        plan["total_urls"] += url_count
+
+    # Estimate duration (rough calculation: 2 minutes per URL)
+    plan["estimated_duration_minutes"] = plan["total_urls"] * 2
+
     return plan
+
+def extract_urls_from_selections(vendors: List[str], vendor_categories: Dict[str, List[Dict]]) -> List[Dict[str, Any]]:
+    """Extract URLs from user selections for direct scraping."""
+    scraping_urls = []
+
+    for vendor_id in vendors:
+        vendor_info = UK_VENDORS[vendor_id]
+        selected_categories = vendor_categories[vendor_id]
+
+        # Extract URLs for selected categories (now with full context)
+        for category_info in selected_categories:
+            if category_info["type"] == "category":
+                # Main category
+                scraping_urls.append({
+                    "vendor": vendor_id,
+                    "vendor_name": vendor_info["name"],
+                    "category_id": category_info["id"],
+                    "category_name": category_info["name"],
+                    "url": category_info["url"],
+                    "type": "category"
+                })
+            else:
+                # Subcategory
+                scraping_urls.append({
+                    "vendor": vendor_id,
+                    "vendor_name": vendor_info["name"],
+                    "category_id": category_info["id"],
+                    "category_name": f"{category_info['parent_category_name']} > {category_info['name']}",
+                    "url": category_info["url"],
+                    "type": "subcategory",
+                    "parent_category": category_info["parent_category_name"]
+                })
+
+    return scraping_urls
 
 def display_scraping_plan(plan: Dict[str, Any]):
     """Display the final scraping plan for user confirmation."""
     console.print(f"\n[bold yellow]📋 Scraping Plan Summary[/bold yellow]")
-    
+
     # Plan overview
     overview_table = Table(show_header=False, box=None)
     overview_table.add_column("Field", style="cyan", width=25)
     overview_table.add_column("Value", style="white")
-    
+
     overview_table.add_row("Session ID", plan["session_id"])
     overview_table.add_row("Scope", SCRAPING_SCOPES[plan["scope"]]["name"])
     overview_table.add_row("Total Vendors", str(len(plan["vendors"])))
+    overview_table.add_row("Total URLs", str(plan.get("total_urls", 0)))
     overview_table.add_row("Estimated Products", str(plan["total_estimated_products"]))
     overview_table.add_row("Estimated Duration", f"{plan['estimated_duration_minutes']} minutes")
-    
+
     console.print(overview_table)
-    
+
     # Vendor details
     console.print(f"\n[bold]Vendor Details:[/bold]")
     for vendor_id, vendor_plan in plan["vendors"].items():
         console.print(f"\n[green]• {vendor_plan['name']}[/green]")
-        console.print(f"  Categories: {', '.join(vendor_plan['categories'])}")
+        console.print(f"  Categories: {', '.join(map(str, vendor_plan['categories']))}")
+        console.print(f"  URLs to scrape: {vendor_plan.get('url_count', 0)}")
         console.print(f"  Estimated products: {vendor_plan['estimated_products']}")
+
+def execute_scraping_plan(plan: Dict[str, Any], scraping_urls: List[Dict[str, Any]], scope: str):
+    """Execute the scraping plan using CrewAI's dynamic multi-agent orchestration."""
+    console.print(f"\n[bold blue]🤖 Initializing dynamic multi-agent scraping...[/bold blue]")
+    console.print(f"[cyan]📋 Session ID: {plan['session_id']}[/cyan]")
+    console.print(f"[cyan]🎯 Scope: {SCRAPING_SCOPES[scope]['name']}[/cyan]")
+    console.print(f"[cyan]📄 Max pages per category: {SCRAPING_SCOPES[scope]['max_pages'] or 'All'}[/cyan]")
+
+    # Use CrewAI's enhanced multi-agent orchestration from main.py
+    from ecommerce_scraper.main import EcommerceScraper
+
+    # Prepare categories for dynamic agent scraping with scope configuration
+    console.print(f"[blue]📋 Preparing {len(scraping_urls)} categories for dynamic agent scraping...[/blue]")
+
+    # Group URLs by vendor for better organization
+    vendor_categories = {}
+    for url_info in scraping_urls:
+        vendor = url_info["vendor"]
+        if vendor not in vendor_categories:
+            vendor_categories[vendor] = []
+        vendor_categories[vendor].append({
+            "url": url_info["url"],
+            "category_name": url_info["category_name"]
+        })
+
+    # Configure enhanced scraper with scope settings
+    max_pages = SCRAPING_SCOPES[scope]['max_pages']
+
+    console.print(f"[blue]🤖 Using CrewAI enhanced multi-agent orchestration[/blue]")
+    console.print(f"[blue]📄 Pages per category: {max_pages or 'All available'}[/blue]")
+
+    # Start dynamic scraping
+    console.print(f"\n[bold green]🚀 Starting dynamic multi-agent scraping...[/bold green]")
+
+    all_results = []
+    total_products = 0
+    successful_categories = 0
+    failed_categories = 0
+
+    # Use context manager for proper resource cleanup
+    try:
+        with EcommerceScraper(verbose=True) as ecommerce_scraper:
+            # Process each vendor's categories
+            for vendor, categories in vendor_categories.items():
+                console.print(f"\n[cyan]🏪 Processing {vendor.upper()} ({len(categories)} categories)[/cyan]")
+
+                for category in categories:
+                    console.print(f"[blue]📂 Scraping: {category['category_name']}[/blue]")
+
+                    with Progress(
+                        SpinnerColumn(),
+                        TextColumn("[progress.description]{task.description}"),
+                        console=console
+                    ) as progress:
+                        task = progress.add_task(
+                            f"Scraping {vendor}/{category['category_name']}...",
+                            total=None
+                        )
+
+                        # Execute direct scraping for this category URL
+                        result = ecommerce_scraper.scrape_category_directly(
+                            category_url=category["url"],
+                            vendor=vendor,
+                            category_name=category["category_name"],
+                            max_pages=max_pages
+                        )
+
+                        progress.update(task, completed=1, total=1)
+
+                    # Process result
+                    all_results.append(result)
+
+                    if result.success:
+                        successful_categories += 1
+                        category_products = len(result.products)
+                        total_products += category_products
+
+                        console.print(f"[green]✅ {vendor}/{category['category_name']}: {category_products} products[/green]")
+
+                        # Show agent breakdown
+                        if result.agent_results:
+                            for agent_result in result.agent_results:
+                                status = "✅" if agent_result['success'] else "❌"
+                                console.print(f"[dim]   {status} Agent {agent_result['agent_id']}: {agent_result['subcategory']} ({agent_result['products_found']} products)[/dim]")
+                    else:
+                        failed_categories += 1
+                        console.print(f"[red]❌ {vendor}/{category['category_name']}: {result.error}[/red]")
+
+            # Display final results
+            console.print(f"\n[bold green]🎉 Dynamic scraping completed![/bold green]")
+            console.print(f"[cyan]📊 Final Results:[/cyan]")
+            console.print(f"  • Total categories: {len(scraping_urls)}")
+            console.print(f"  • Successful: {successful_categories}")
+            console.print(f"  • Failed: {failed_categories}")
+            console.print(f"  • Total products: {total_products}")
+            console.print(f"  • Average products per category: {total_products/successful_categories if successful_categories > 0 else 0:.1f}")
+
+            # Show vendor breakdown
+            if len(vendor_categories) > 1:
+                console.print(f"\n[cyan]🏪 Vendor Breakdown:[/cyan]")
+                for vendor in vendor_categories:
+                    vendor_results = [r for r in all_results if any(cat['url'] in str(r) for cat in vendor_categories[vendor])]
+                    vendor_products = sum(len(r.products) for r in vendor_results if r.success)
+                    console.print(f"  • {vendor.upper()}: {vendor_products} products")
+
+    except KeyboardInterrupt:
+        console.print("\n[yellow]⚠️ Scraping interrupted by user[/yellow]")
+    except Exception as e:
+        console.print(f"\n[red]❌ Dynamic scraping error: {e}[/red]")
+        import traceback
+        console.print(f"[red]{traceback.format_exc()}[/red]")
+
+    console.print(f"\n[cyan]💾 Results processed by individual agents with detailed logging[/cyan]")
 
 def main():
     """Main enhanced interactive scraping workflow."""
     try:
         # Welcome and setup
         show_welcome()
-        
-        # Initialize scraper
-        console.print("\n[blue]🔧 Initializing scraper...[/blue]")
-        scraper = EcommerceScraper(verbose=True)
-        
+
         # Step 1: Vendor Selection
         selected_vendors = select_vendors()
         
@@ -420,10 +585,24 @@ def main():
                     if "subcategories" in category and category["subcategories"]:
                         # Category has subcategories, let user select them
                         selected_subcategories = select_subcategories(category)
-                        final_categories.extend([subcat["id"] for subcat in selected_subcategories])
+                        # Store subcategory info with parent context to avoid ID collisions
+                        for subcat in selected_subcategories:
+                            final_categories.append({
+                                "id": subcat["id"],
+                                "name": subcat["name"],
+                                "url": subcat["url"],
+                                "parent_category_id": category["id"],
+                                "parent_category_name": category["name"],
+                                "type": "subcategory"
+                            })
                     else:
                         # Category has no subcategories, add it directly
-                        final_categories.append(category_id)
+                        final_categories.append({
+                            "id": category_id,
+                            "name": category["name"],
+                            "url": category["url"],
+                            "type": "category"
+                        })
 
             vendor_categories[vendor_id] = final_categories
         
@@ -438,11 +617,23 @@ def main():
         if not Confirm.ask("\n[bold]Start scraping with this plan?[/bold]", default=True):
             console.print("[yellow]❌ Scraping cancelled by user.[/yellow]")
             return
-        
-        # TODO: Execute scraping plan
+
+        # Execute scraping plan
         console.print(f"\n[green]🚀 Starting scraping session: {plan['session_id']}[/green]")
-        console.print("[yellow]⚠️  Scraping execution not yet implemented - this is the CLI foundation.[/yellow]")
-        
+
+        # Extract URLs from selections
+        console.print("[blue]🔗 Extracting URLs from category selections...[/blue]")
+        scraping_urls = extract_urls_from_selections(selected_vendors, vendor_categories)
+
+        if not scraping_urls:
+            console.print("[red]❌ No URLs found for scraping. Please check your selections.[/red]")
+            return
+
+        console.print(f"[green]✅ Found {len(scraping_urls)} URLs to scrape[/green]")
+
+        # Execute the scraping
+        execute_scraping_plan(plan, scraping_urls, scope)
+
         # Save plan for future reference
         plan_file = f"scraping_plans/{plan['session_id']}.json"
         os.makedirs("scraping_plans", exist_ok=True)

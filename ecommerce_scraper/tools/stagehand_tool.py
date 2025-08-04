@@ -246,6 +246,19 @@ class EcommerceStagehandTool(BaseTool):
             self._logger.error(f"Error executing Stagehand command: {str(e)}")
             return f"Error executing Stagehand command: {str(e)}"
 
+    def _wait_for_page_stability(self, stagehand: Stagehand) -> bool:
+        """Wait for page to be stable before executing commands."""
+        try:
+            if hasattr(stagehand, 'page') and stagehand.page:
+                # Wait for network to be idle
+                run_async_safely(stagehand.page.wait_for_load_state('networkidle', timeout=10000))
+                # Additional small wait for dynamic content
+                time.sleep(2)
+                return True
+        except Exception as e:
+            self._logger.warning(f"Page stability check failed: {str(e)}")
+        return False
+
     def _execute_with_retry(self, stagehand: Stagehand, command_type: str, instruction: str, selector: Optional[str] = None) -> str:
         """Execute command with retry logic and proper error handling."""
         last_error = None
@@ -253,6 +266,10 @@ class EcommerceStagehandTool(BaseTool):
         for attempt in range(settings.max_retries):
             try:
                 self._logger.info(f"Executing {command_type} command (attempt {attempt + 1}): {instruction[:50]}...")
+
+                # Wait for page stability before executing commands
+                if attempt > 0:  # Skip on first attempt for speed
+                    self._wait_for_page_stability(stagehand)
 
                 if command_type == "act":
                     result = run_async_safely(stagehand.page.act(instruction))
@@ -301,9 +318,29 @@ class EcommerceStagehandTool(BaseTool):
 
             except Exception as e:
                 last_error = e
-                self._logger.warning(f"Attempt {attempt + 1} failed: {str(e)}")
+                error_msg = str(e)
+                self._logger.warning(f"Attempt {attempt + 1} failed: {error_msg}")
+
+                # Handle specific CDP errors that require special treatment
+                if "Object id doesn't reference a Node" in error_msg or "DOM.describeNode" in error_msg:
+                    self._logger.info("CDP DOM error detected - waiting for page to stabilize")
+                    time.sleep(5)  # Longer wait for DOM stability
+
+                    # Try to refresh the page state
+                    try:
+                        if hasattr(stagehand, 'page') and stagehand.page:
+                            run_async_safely(stagehand.page.wait_for_load_state('networkidle'))
+                    except:
+                        pass  # Continue with retry even if wait fails
+
+                elif "Protocol error" in error_msg or "Session closed" in error_msg:
+                    self._logger.info("Browser session error detected - longer wait before retry")
+                    time.sleep(10)  # Even longer wait for session issues
+
                 if attempt < settings.max_retries - 1:
-                    time.sleep(2 ** attempt)  # Exponential backoff
+                    wait_time = min(2 ** attempt, 30)  # Cap exponential backoff at 30 seconds
+                    self._logger.info(f"Retrying in {wait_time} seconds...")
+                    time.sleep(wait_time)
 
         return f"Error: All {settings.max_retries} attempts failed. Last error: {str(last_error)}"
 

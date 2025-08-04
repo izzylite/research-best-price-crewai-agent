@@ -1,0 +1,32 @@
+[
+  {
+    "id": 1,
+    "name": "Action Figures",
+    "url": "/action-figures"
+  },
+  {
+    "id": 2,
+    "name": "Dolls & Accessories",
+    "url": "/dolls"
+  },
+  {
+    "id": 3,
+    "name": "Educational Toys",
+    "url": "/educational"
+  },
+  {
+    "id": 4,
+    "name": "Outdoor Toys",
+    "url": "/outdoor"
+  },
+  {
+    "id": 5,
+    "name": "Board Games",
+    "url": "/board-games"
+  },
+  {
+    "id": 6,
+    "name": "Popular Brands",
+    "url": "/brands"
+  }
+]

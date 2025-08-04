@@ -1,0 +1,121 @@
+[
+  {
+    "id": 1,
+    "name": "Women",
+    "url": "/women",
+    "subcategories": [
+      {
+        "id": 1,
+        "name": "Shop All",
+        "url": "/women/shop-all"
+      },
+      {
+        "id": 2,
+        "name": "All Clothing",
+        "url": "/women/clothing"
+      },
+      {
+        "id": 3,
+        "name": "All Footwear",
+        "url": "/women/footwear"
+      },
+      {
+        "id": 4,
+        "name": "Dresses",
+        "url": "/women/dresses"
+      },
+      {
+        "id": 5,
+        "name": "Tops",
+        "url": "/women/tops"
+      },
+      {
+        "id": 6,
+        "name": "Jeans & Trousers",
+        "url": "/women/jeans-trousers"
+      },
+      {
+        "id": 7,
+        "name": "Accessories",
+        "url": "/women/accessories"
+      }
+    ]
+  },
+  {
+    "id": 2,
+    "name": "Men",
+    "url": "/men"
+  },
+  {
+    "id": 3,
+    "name": "Girls",
+    "url": "/girls"
+  },
+  {
+    "id": 4,
+    "name": "Boys",
+    "url": "/boys"
+  },
+  {
+    "id": 5,
+    "name": "Home",
+    "url": "/home",
+    "subcategories": [
+      {
+        "id": 1,
+        "name": "Shop All Home",
+        "url": "/home/shop-all"
+      },
+      {
+        "id": 2,
+        "name": "Bedroom",
+        "url": "/home/bedroom"
+      },
+      {
+        "id": 3,
+        "name": "Bathroom",
+        "url": "/home/bathroom"
+      },
+      {
+        "id": 4,
+        "name": "Living Room",
+        "url": "/home/living-room"
+      },
+      {
+        "id": 5,
+        "name": "Kitchen & Dining",
+        "url": "/home/kitchen-dining"
+      },
+      {
+        "id": 6,
+        "name": "Garden",
+        "url": "/home/garden"
+      },
+      {
+        "id": 7,
+        "name": "Lighting",
+        "url": "/home/lighting"
+      }
+    ]
+  },
+  {
+    "id": 6,
+    "name": "Beauty",
+    "url": "/beauty"
+  },
+  {
+    "id": 7,
+    "name": "Designer Brands",
+    "url": "/designer-brands"
+  },
+  {
+    "id": 8,
+    "name": "Lipsy",
+    "url": "/lipsy"
+  },
+  {
+    "id": 9,
+    "name": "Shop Clearance",
+    "url": "/shop-clearance"
+  }
+]

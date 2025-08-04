@@ -1,0 +1,14 @@
+{
+  "session_start": "2025-08-04T00:17:47.134784",
+  "total_thoughts": 0,
+  "total_tool_calls": 0,
+  "total_tasks": 0,
+  "successful_tool_calls": 0,
+  "failed_tool_calls": 0,
+  "agents_used": [
+    "CrewAI_System"
+  ],
+  "tools_used": [],
+  "session_end": "2025-08-04T00:19:37.150693",
+  "tool_success_rate": 0.0
+}

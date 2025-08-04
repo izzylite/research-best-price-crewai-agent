@@ -130,6 +130,11 @@ class PaginationState:
             # Unknown total, return based on products scraped
             return min(self.products_scraped / 1000, 1.0)  # Assume 1000 as rough estimate
 
+    def mark_complete(self):
+        """Mark this pagination state as completed."""
+        self.status = SessionStatus.COMPLETED
+        self.last_updated = datetime.now(timezone.utc)
+
 
 class StateManager:
     """Manages scraping state with persistence and resume functionality."""
@@ -149,8 +154,9 @@ class StateManager:
     
     def _get_state_filename(self, session_id: str, vendor: str, category: str) -> Path:
         """Get filename for state file."""
-        safe_vendor = vendor.replace('/', '_').replace('\\', '_')
-        safe_category = category.replace('/', '_').replace('\\', '_')
+        # Clean vendor and category names for safe filenames
+        safe_vendor = vendor.replace('/', '_').replace('\\', '_').replace(':', '_').replace('*', '_').replace('?', '_').replace('"', '_').replace('<', '_').replace('>', '_').replace('|', '_')
+        safe_category = category.replace('/', '_').replace('\\', '_').replace(':', '_').replace('*', '_').replace('?', '_').replace('"', '_').replace('<', '_').replace('>', '_').replace('|', '_').replace(',', '_').replace('&', 'and').replace(' ', '_')
         return self.state_dir / f"{session_id}_{safe_vendor}_{safe_category}.json"
     
     def _load_existing_sessions(self):

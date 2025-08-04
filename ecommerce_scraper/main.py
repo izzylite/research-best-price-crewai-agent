@@ -41,19 +41,36 @@ from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
 from .agents.product_scraper import ProductScraperAgent
-from .agents.site_navigator import SiteNavigatorAgent
 from .agents.data_extractor import DataExtractorAgent
 from .agents.data_validator import DataValidatorAgent
-from .config.sites import get_site_config, detect_site_type, SiteType, get_all_supported_vendors
-from .schemas.product import Product
+from .config.sites import get_site_config, detect_site_type
 from .schemas.standardized_product import StandardizedProduct
 from .state.state_manager import StateManager
 from .progress.progress_tracker import ProgressTracker
-from .batch.batch_processor import BatchProcessor
-from crewai_tools import StagehandTool
+from .logging.crew_logger import get_crew_logger, close_crew_logger
+from .logging.ai_logger import get_ai_logger, close_ai_logger
 from stagehand.schemas import AvailableModel
 from .tools.data_tools import ProductDataValidator, PriceExtractor, ImageExtractor
 from .tools.stagehand_tool import EcommerceStagehandTool
+
+
+class DynamicScrapingResult:
+    """Result from dynamic category scraping operation."""
+
+    def __init__(self, success: bool, products: List[StandardizedProduct] = None,
+                 error: str = None, agent_results: List[Dict] = None,
+                 session_id: str = None, vendor: str = None, category: str = None,
+                 raw_crew_result: Any = None):
+        self.success = success
+        self.products = products or []
+        self.error = error
+        self.agent_results = agent_results or []
+        self.timestamp = datetime.now()
+        self.total_products = len(self.products)
+        self.session_id = session_id
+        self.vendor = vendor
+        self.category = category
+        self.raw_crew_result = raw_crew_result
 
 
 class EcommerceScraper:
@@ -62,10 +79,20 @@ class EcommerceScraper:
     def __init__(self,
                  verbose: bool = True,
                  enable_state_management: bool = True,
-                 enable_progress_tracking: bool = True):
+                 enable_progress_tracking: bool = True,
+                 session_id: Optional[str] = None):
         """Initialize the enhanced ecommerce scraper with multi-vendor capabilities."""
         self.console = Console()
         self.verbose = verbose
+
+        # Initialize logging system
+        self.session_id = session_id or f"scraper_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        self.crew_logger = get_crew_logger(self.session_id)
+        self.ai_logger = get_ai_logger(self.session_id)
+
+        if self.verbose:
+            self.console.print(f"[bold blue]🔍 AI Logging enabled for session: {self.session_id}[/bold blue]")
+            self.console.print(f"[cyan]📁 Logs will be saved to: logs/{self.session_id}/[/cyan]")
 
         # Initialize enhanced components
         self.state_manager = StateManager() if enable_state_management else None
@@ -105,13 +132,7 @@ class EcommerceScraper:
             progress_tracker=self.progress_tracker
         )
 
-        # SiteNavigatorAgent: Multi-vendor navigation with site configurations
-        site_navigator_tools = []
-        self.site_navigator = SiteNavigatorAgent(
-            tools=site_navigator_tools,
-            llm=self.llm,
-            site_configs={}  # Will be populated with vendor configs
-        )
+        # SiteNavigatorAgent removed - no longer needed for direct category URLs
 
         # DataExtractorAgent: Standardized extraction with vendor support
         data_extractor_tools = [PriceExtractor(), ImageExtractor()]
@@ -126,9 +147,323 @@ class EcommerceScraper:
         self.data_validator = DataValidatorAgent(tools=data_validator_tools, llm=self.llm)
 
     def _create_stagehand_tool(self):
-        """Create a StagehandTool instance with proper configuration."""
+        """Create a StagehandTool instance with proper configuration and logging."""
         # Use our custom EcommerceStagehandTool instead of the buggy CrewAI StagehandTool
         return EcommerceStagehandTool()
+
+    def scrape_category_directly(self,
+                               category_url: str,
+                               vendor: str,
+                               category_name: str,
+                               max_pages: Optional[int] = None) -> DynamicScrapingResult:
+        """
+        Scrape a category directly using dynamic crew creation.
+
+        Args:
+            category_url: Direct URL to the category page to scrape
+            vendor: Vendor name (e.g., 'asda', 'tesco')
+            category_name: Human-readable category name
+            max_pages: Maximum pages to scrape per category (None = all pages)
+
+        Returns:
+            DynamicScrapingResult with products and metadata
+        """
+        start_time = datetime.now()
+        stagehand_tool = None
+
+        try:
+            if self.verbose:
+                self.console.print(f"[bold blue]Starting direct category scraping: {vendor}/{category_name}[/bold blue]")
+                self.console.print(f"[cyan]URL: {category_url}[/cyan]")
+                self.console.print(f"[cyan]Max pages: {max_pages or 'All available'}[/cyan]")
+
+            # Create StagehandTool instance
+            stagehand_tool = self._create_stagehand_tool()
+
+            # Create dynamic agents for this specific category
+            product_scraper_agent = self.product_scraper.get_agent()
+            data_extractor_agent = self.data_extractor.get_agent()
+            data_validator_agent = self.data_validator.get_agent()
+
+            # Add StagehandTool to agents that need it
+            product_scraper_agent.tools = [stagehand_tool, ProductDataValidator()]
+
+            # Create separate stagehand tool instances for other agents to avoid conflicts
+            data_extractor_stagehand = self._create_stagehand_tool()
+            data_extractor_agent.tools = [data_extractor_stagehand, PriceExtractor(), ImageExtractor()]
+
+            data_validator_agent.tools = [ProductDataValidator(), PriceExtractor()]
+
+            # Create category-specific tasks using existing methods
+            # Create a temporary session ID for state management
+            temp_session_id = f"category_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+
+            scraping_task = self.product_scraper.create_direct_category_scraping_task(
+                vendor=vendor,
+                category=category_name,
+                category_url=category_url,
+                session_id=temp_session_id,
+                max_pages=max_pages
+            )
+
+            extraction_task = self.data_extractor.create_standardized_extraction_task(
+                vendor=vendor,
+                category=category_name,
+                session_id=temp_session_id
+            )
+
+            validation_task = self.data_validator.create_standardized_validation_task(
+                vendor=vendor,
+                category=category_name,
+                session_id=temp_session_id
+            )
+
+            # Create dynamic crew for this category
+            crew = Crew(
+                agents=[product_scraper_agent, data_extractor_agent, data_validator_agent],
+                tasks=[scraping_task, extraction_task, validation_task],
+                verbose=self.verbose,
+                memory=True
+            )
+
+            # Log crew start
+            crew_id = f"crew_{temp_session_id}"
+            agent_names = [agent.role for agent in crew.agents]
+            task_descriptions = [task.description[:100] + "..." for task in crew.tasks]
+
+            self.crew_logger.log_crew_start(
+                crew_id=crew_id,
+                agents=agent_names,
+                tasks=task_descriptions
+            )
+
+            # Execute the crew
+            try:
+                if self.verbose:
+                    with Progress(
+                        SpinnerColumn(),
+                        TextColumn("[progress.description]{task.description}"),
+                        console=self.console,
+                        transient=True
+                    ) as progress:
+                        task = progress.add_task(f"Scraping {vendor}/{category_name}...", total=None)
+                        crew_result = crew.kickoff()
+                        progress.update(task, completed=True)
+                else:
+                    crew_result = crew.kickoff()
+
+                # Log successful crew completion
+                self.crew_logger.log_crew_end(crew_id=crew_id, success=True, result=crew_result)
+
+            except Exception as crew_error:
+                # Log failed crew execution
+                self.crew_logger.log_crew_end(crew_id=crew_id, success=False, result=str(crew_error))
+                raise
+
+            # Parse results into StandardizedProduct objects
+            products = self._parse_crew_result(crew_result)
+
+            # Create agent result summary
+            agent_results = [{
+                'agent_id': 1,
+                'subcategory': category_name,
+                'success': True,
+                'products_found': len(products),
+                'url': category_url
+            }]
+
+            if self.verbose:
+                duration = (datetime.now() - start_time).total_seconds()
+                self.console.print(f"[bold green]✅ Category scraping completed: {len(products)} products in {duration:.1f}s[/bold green]")
+
+            return DynamicScrapingResult(
+                success=True,
+                products=products,
+                agent_results=agent_results,
+                session_id=f"category_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+                vendor=vendor,
+                category=category_name,
+                raw_crew_result=crew_result
+            )
+
+        except Exception as e:
+            error_msg = f"Direct category scraping failed for {vendor}/{category_name}: {str(e)}"
+            if self.verbose:
+                self.console.print(f"[bold red]❌ {error_msg}[/bold red]")
+
+            return DynamicScrapingResult(
+                success=False,
+                products=[],
+                agent_results=[{
+                    'agent_id': 1,
+                    'subcategory': category_name,
+                    'success': False,
+                    'products_found': 0,
+                    'url': category_url,
+                    'error': str(e)
+                }],
+                session_id=f"category_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+                vendor=vendor,
+                category=category_name,
+                error=error_msg
+            )
+        finally:
+            # Always cleanup the StagehandTool session
+            if stagehand_tool:
+                try:
+                    stagehand_tool.close()
+                    if self.verbose:
+                        self.console.print("[dim]🧹 StagehandTool session cleaned up[/dim]")
+                except Exception as cleanup_error:
+                    if self.verbose:
+                        self.console.print(f"[dim]⚠️ Warning: StagehandTool cleanup failed: {cleanup_error}[/dim]")
+
+    def _parse_crew_result(self, crew_result: Any) -> List[StandardizedProduct]:
+        """
+        Parse CrewAI result into StandardizedProduct objects.
+
+        Args:
+            crew_result: Result from CrewAI crew execution
+
+        Returns:
+            List of StandardizedProduct objects
+        """
+        products = []
+
+        try:
+            # First, try to access task results if available
+            if hasattr(crew_result, 'tasks_output') and crew_result.tasks_output:
+                if self.verbose:
+                    self.console.print("[dim]Checking task outputs for product data...[/dim]")
+
+                # Look through task outputs for product data
+                for task_output in crew_result.tasks_output:
+                    if hasattr(task_output, 'raw'):
+                        task_data = task_output.raw
+                        products_from_task = self._extract_products_from_data(task_data)
+                        if products_from_task:
+                            products.extend(products_from_task)
+                            if self.verbose:
+                                self.console.print(f"[dim]Found {len(products_from_task)} products in task output[/dim]")
+
+                if products:
+                    return products
+
+            # Extract result data from main result
+            if hasattr(crew_result, 'raw'):
+                result_data = crew_result.raw
+            elif hasattr(crew_result, 'json'):
+                result_data = crew_result.json
+            else:
+                result_data = str(crew_result)
+
+            # Try to parse as JSON if it's a string
+            if isinstance(result_data, str):
+                try:
+                    import json
+                    parsed_data = json.loads(result_data)
+                    result_data = parsed_data
+                except (json.JSONDecodeError, ValueError):
+                    # If parsing fails, try to extract products from text
+                    if self.verbose:
+                        self.console.print("[dim]Warning: Could not parse result as JSON, attempting text extraction[/dim]")
+                    return []
+
+            # Convert to StandardizedProduct objects
+            if isinstance(result_data, list):
+                for item in result_data:
+                    if isinstance(item, dict):
+                        try:
+                            product = StandardizedProduct(**item)
+                            products.append(product)
+                        except Exception as e:
+                            if self.verbose:
+                                self.console.print(f"[dim]Warning: Could not create StandardizedProduct from {item}: {e}[/dim]")
+            elif isinstance(result_data, dict):
+                # Check if this is a validation result with validated_products key
+                if 'validated_products' in result_data:
+                    validated_products = result_data['validated_products']
+                    if isinstance(validated_products, list):
+                        for item in validated_products:
+                            if isinstance(item, dict):
+                                try:
+                                    product = StandardizedProduct(**item)
+                                    products.append(product)
+                                except Exception as e:
+                                    if self.verbose:
+                                        self.console.print(f"[dim]Warning: Could not create StandardizedProduct from {item}: {e}[/dim]")
+                else:
+                    # Single product result
+                    try:
+                        product = StandardizedProduct(**result_data)
+                        products.append(product)
+                    except Exception as e:
+                        if self.verbose:
+                            self.console.print(f"[dim]Warning: Could not create StandardizedProduct from result: {e}[/dim]")
+
+        except Exception as e:
+            if self.verbose:
+                self.console.print(f"[dim]Warning: Error parsing crew result: {e}[/dim]")
+
+        return products
+
+    def _extract_products_from_data(self, data: Any) -> List[StandardizedProduct]:
+        """Extract StandardizedProduct objects from various data formats."""
+        products = []
+
+        try:
+            # Try to parse as JSON if it's a string
+            if isinstance(data, str):
+                try:
+                    import json
+                    data = json.loads(data)
+                except (json.JSONDecodeError, ValueError):
+                    return []
+
+            # Handle different data structures
+            if isinstance(data, list):
+                for item in data:
+                    if isinstance(item, dict):
+                        try:
+                            product = StandardizedProduct(**item)
+                            products.append(product)
+                        except Exception:
+                            pass  # Skip invalid products - DataValidatorAgent failed to standardize
+            elif isinstance(data, dict):
+                # Check for validated_products key
+                if 'validated_products' in data:
+                    validated_products = data['validated_products']
+                    if isinstance(validated_products, list):
+                        for item in validated_products:
+                            if isinstance(item, dict):
+                                try:
+                                    product = StandardizedProduct(**item)
+                                    products.append(product)
+                                except Exception:
+                                    pass  # Skip invalid products - DataValidatorAgent failed to standardize
+                # Check for products key
+                elif 'products' in data:
+                    products_data = data['products']
+                    if isinstance(products_data, list):
+                        for item in products_data:
+                            if isinstance(item, dict):
+                                try:
+                                    product = StandardizedProduct(**item)
+                                    products.append(product)
+                                except Exception:
+                                    pass  # Skip invalid products - DataValidatorAgent failed to standardize
+                # Single product
+                else:
+                    try:
+                        product = StandardizedProduct(**data)
+                        products.append(product)
+                    except Exception:
+                        pass  # Skip invalid product - DataValidatorAgent failed to standardize
+
+        except Exception:
+            pass  # Return empty list on any error
+
+        return products
 
     def scrape_vendor_category(self,
                              vendor: str,
@@ -158,26 +493,23 @@ class EcommerceScraper:
             # Create StagehandTool instance
             stagehand_tool = self._create_stagehand_tool()
 
-            # Add StagehandTool to agents that need it
-            self.site_navigator.get_agent().tools = [stagehand_tool]
+            # Add StagehandTool to agents that need it (removed site_navigator)
             self.data_extractor.get_agent().tools = [stagehand_tool, PriceExtractor(), ImageExtractor()]
             self.product_scraper.get_agent().tools = [stagehand_tool, ProductDataValidator()]
 
-            # Create multi-vendor tasks
-            navigation_task = self.site_navigator.create_vendor_navigation_task(vendor, category, session_id)
+            # Create multi-vendor tasks (removed navigation_task)
             extraction_task = self.data_extractor.create_standardized_extraction_task(vendor, category, session_id)
             scraping_task = self.product_scraper.create_multi_vendor_scraping_task(vendor, category, session_id, max_pages)
             validation_task = self.data_validator.create_standardized_validation_task(vendor, category, session_id)
 
-            # Create crew with all agents
+            # Create crew with remaining agents
             crew = Crew(
                 agents=[
-                    self.site_navigator.get_agent(),
                     self.data_extractor.get_agent(),
                     self.product_scraper.get_agent(),
                     self.data_validator.get_agent()
                 ],
-                tasks=[navigation_task, extraction_task, scraping_task, validation_task],
+                tasks=[extraction_task, scraping_task, validation_task],
                 verbose=self.verbose,
                 memory=True
             )
@@ -241,8 +573,7 @@ class EcommerceScraper:
             # Create StagehandTool instance
             stagehand_tool = self._create_stagehand_tool()
 
-            # Add StagehandTool to agents that need it
-            self.site_navigator.get_agent().tools = [stagehand_tool]
+            # Add StagehandTool to agents that need it (removed site_navigator)
             self.data_extractor.get_agent().tools = [stagehand_tool, PriceExtractor(), ImageExtractor()]
             self.product_scraper.get_agent().tools = [stagehand_tool, ProductDataValidator()]
 
@@ -252,11 +583,10 @@ class EcommerceScraper:
                 site_type=site_type
             )
 
-            # Create crew with all agents
+            # Create crew with remaining agents
             crew = Crew(
                 agents=[
                     self.product_scraper.get_agent(),
-                    self.site_navigator.get_agent(),
                     self.data_extractor.get_agent(),
                     self.data_validator.get_agent()
                 ],
@@ -392,11 +722,10 @@ class EcommerceScraper:
                 max_products=max_products
             )
             
-            # Create crew without memory to avoid API key issues
+            # Create crew without memory to avoid API key issues (removed site_navigator)
             crew = Crew(
                 agents=[
                     self.product_scraper.get_agent(),
-                    self.site_navigator.get_agent(),
                     self.data_extractor.get_agent(),
                     self.data_validator.get_agent()
                 ],
@@ -503,6 +832,18 @@ class EcommerceScraper:
         except Exception as e:
             if self.verbose:
                 self.console.print(f"[yellow]Warning: Error during cleanup: {e}[/yellow]")
+
+        # Close logging system and save final summary
+        try:
+            if hasattr(self, 'crew_logger'):
+                if self.verbose:
+                    self.console.print("📊 Saving AI activity logs...")
+                self.crew_logger.close()
+                if self.verbose:
+                    self.console.print(f"✅ Logs saved to: logs/{self.session_id}/")
+        except Exception as e:
+            if self.verbose:
+                self.console.print(f"[yellow]Warning: Error saving logs: {e}[/yellow]")
     
     def __enter__(self):
         """Context manager entry."""
