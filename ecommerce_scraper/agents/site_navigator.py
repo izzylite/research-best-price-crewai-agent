@@ -115,18 +115,31 @@ class SiteNavigatorAgent:
         
         Your task is to:
         1. Navigate to the target URL
-        2. Handle any initial popups, banners, or consent requests
-        3. Accomplish the specific navigation goal
-        4. Verify that you've reached the correct page/section
-        5. Report on any obstacles encountered and how they were resolved
+        2. **IMMEDIATELY handle any blocking popups, banners, or consent requests:**
+           - Look for cookie consent banners and click "Accept All" or "I Accept"
+           - Dismiss privacy policy dialogs by clicking "Accept" or "Continue"
+           - Close newsletter signup popups with "No Thanks", "Close", or "X"
+           - Handle age verification by clicking "Yes" or entering appropriate age
+           - Select "United Kingdom" or "UK" for location prompts
+           - Accept GDPR compliance by clicking "Accept" or "Continue"
+           - Dismiss promotional offers with "Close" or "No Thanks"
+           - Handle app download prompts with "Continue in Browser"
+        3. **VERIFY the main content is visible and not blocked by overlays**
+        4. Accomplish the specific navigation goal
+        5. Verify that you've reached the correct page/section
+        6. Report on any obstacles encountered and how they were resolved
         
-        Common challenges to watch for:
-        - Cookie consent banners (accept them)
-        - Age verification prompts (handle appropriately)
-        - Location/country selection dialogs
-        - Newsletter signup popups (dismiss them)
-        - Loading delays and dynamic content
-        - Mobile vs desktop layout differences
+        Common challenges to watch for and MUST handle immediately:
+        - **Cookie consent banners** (click "Accept All", "I Accept", "Accept Cookies", "Continue")
+        - **Privacy policy dialogs** (click "Accept", "I Agree", "Continue")
+        - **Age verification prompts** (enter appropriate age or click "Yes", "I am 18+")
+        - **Location/country selection dialogs** (select "United Kingdom", "UK", or "Continue")
+        - **Newsletter signup popups** (click "Close", "No Thanks", "Skip", "X" button, "Maybe Later")
+        - **GDPR compliance banners** (click "Accept", "Accept All", "Continue")
+        - **Promotional banners/offers** (click "Close", "Dismiss", "No Thanks", "Continue Shopping")
+        - **Mobile app download prompts** (click "Continue in Browser", "Not Now", "Stay on Web")
+        - **Loading delays and dynamic content** (wait for elements to appear)
+        - **Mobile vs desktop layout differences** (adapt to different layouts)
         
         Be patient and allow pages to fully load before taking actions.
         """

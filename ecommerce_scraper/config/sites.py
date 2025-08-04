@@ -73,7 +73,7 @@ SITE_CONFIGS = {
             "category_nav": "[data-testid='category-navigation']",
         },
         navigation_instructions={
-            "handle_popups": "Accept GDPR cookie consent, dismiss location prompts and promotional banners",
+            "handle_popups": "CRITICAL: Look for privacy dialog with 'Your privacy is important to us' text and click 'I Accept' button. Also dismiss any location prompts, promotional banners, and cookie consent overlays. Check for newsletter signup popups and close them.",
             "search_strategy": "Use main search in header, handle autocomplete suggestions",
             "category_discovery": "Navigate through main menu and category pages",
             "product_access": "Wait for dynamic content to load, handle lazy-loaded images",
@@ -145,7 +145,7 @@ SITE_CONFIGS = {
             "description": "#feature-bullets ul",
         },
         navigation_instructions={
-            "handle_popups": "Dismiss any cookie banners, location prompts, or promotional popups",
+            "handle_popups": "CRITICAL: Look for cookie consent banners and click 'Accept All' or 'Accept Cookies'. Dismiss Clubcard signup prompts, location/delivery area selection, and age verification for alcohol products. Handle promotional offer overlays.",
             "search_strategy": "Use the main search box in the header, wait for autocomplete to load",
             "product_access": "Ensure product page is fully loaded including images and pricing",
         },

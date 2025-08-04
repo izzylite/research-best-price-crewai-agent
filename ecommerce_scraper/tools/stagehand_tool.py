@@ -218,6 +218,9 @@ class EcommerceStagehandTool(BaseTool):
                     time.sleep(3)  # Increased wait time for better page loading
                     print("Navigation completed")
 
+                    # Auto-handle common popups after navigation
+                    self._auto_handle_popups(stagehand)
+
                     # If this is just a navigation request, return success
                     if instruction and any(nav_word in instruction.lower() for nav_word in ['navigate', 'go to', 'visit', 'open']):
                         return f"Successfully navigated to {url}"
@@ -343,6 +346,54 @@ class EcommerceStagehandTool(BaseTool):
                     time.sleep(wait_time)
 
         return f"Error: All {settings.max_retries} attempts failed. Last error: {str(last_error)}"
+
+    def _auto_handle_popups(self, stagehand) -> None:
+        """Automatically handle common popups after navigation."""
+        try:
+            self._logger.info("Auto-handling common popups...")
+
+            # Wait a moment for popups to appear
+            time.sleep(2)
+
+            # Try to dismiss cookie consent
+            try:
+                result = run_async_safely(stagehand.page.act("Look for cookie consent banner or privacy dialog and click Accept All, I Accept, or Accept Cookies"))
+                self._logger.info("Attempted cookie consent dismissal")
+            except Exception as e:
+                self._logger.debug(f"Cookie consent handling failed: {e}")
+
+            # Try to dismiss newsletter popup
+            try:
+                result = run_async_safely(stagehand.page.act("Look for newsletter signup popup and click Close, No Thanks, Skip, or X button"))
+                self._logger.info("Attempted newsletter popup dismissal")
+            except Exception as e:
+                self._logger.debug(f"Newsletter popup handling failed: {e}")
+
+            # Try to handle age verification
+            try:
+                result = run_async_safely(stagehand.page.act("Look for age verification prompt and click Yes, I am 18+, or enter age 25"))
+                self._logger.info("Attempted age verification handling")
+            except Exception as e:
+                self._logger.debug(f"Age verification handling failed: {e}")
+
+            # Try to handle location selection
+            try:
+                result = run_async_safely(stagehand.page.act("Look for location or country selection and choose United Kingdom or UK"))
+                self._logger.info("Attempted location selection handling")
+            except Exception as e:
+                self._logger.debug(f"Location selection handling failed: {e}")
+
+            # Final check for any remaining overlays
+            try:
+                result = run_async_safely(stagehand.page.act("Look for any remaining popup, modal, or overlay blocking the main content and dismiss it"))
+                self._logger.info("Attempted general popup dismissal")
+            except Exception as e:
+                self._logger.debug(f"General popup handling failed: {e}")
+
+            self._logger.info("Auto popup handling completed")
+
+        except Exception as e:
+            self._logger.warning(f"Auto popup handling encountered error: {e}")
 
     def extract_product_data(self, **kwargs) -> str:
         """Extract structured product data using enhanced best practices."""

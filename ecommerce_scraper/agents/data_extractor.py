@@ -88,14 +88,22 @@ class DataExtractorAgent:
         }}
 
         EXTRACTION REQUIREMENTS:
-        1. Extract ALL products visible on the current page
-        2. Use vendor-specific selectors and patterns when available
-        3. Ensure all required fields are populated
-        4. Handle missing data gracefully (skip products with missing required fields)
-        5. Extract accurate pricing information in GBP
-        6. Get the primary/main product image URL
-        7. Clean and normalize product names and descriptions
-        8. Extract weight information for grocery items when available
+        1. **FIRST: Check for and dismiss any blocking popups or overlays:**
+           - Cookie consent banners (click "Accept All", "I Accept")
+           - Privacy dialogs (click "Accept", "Continue")
+           - Newsletter popups (click "Close", "No Thanks", "X")
+           - Promotional overlays (click "Close", "Dismiss")
+           - Age verification prompts (handle appropriately)
+           - Location selection (choose UK if prompted)
+        2. **VERIFY the product listing is fully visible and accessible**
+        3. Extract ALL products visible on the current page
+        4. Use vendor-specific selectors and patterns when available
+        5. Ensure all required fields are populated
+        6. Handle missing data gracefully (skip products with missing required fields)
+        7. Extract accurate pricing information in GBP
+        8. Get the primary/main product image URL
+        9. Clean and normalize product names and descriptions
+        10. Extract weight information for grocery items when available
 
         VENDOR-SPECIFIC CONSIDERATIONS:
         - Respect {vendor}'s specific HTML structure and CSS selectors

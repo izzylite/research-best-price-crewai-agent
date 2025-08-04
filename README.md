@@ -7,6 +7,7 @@ A comprehensive, multi-agent ecommerce scraping system built with **Stagehand** 
 - **🤖 AI-Powered Extraction**: Uses LLMs to intelligently navigate and extract data from dynamic websites
 - **🎯 Multi-Agent Architecture**: Specialized agents for navigation, extraction, validation, and coordination
 - **🌐 Multi-Platform Support**: Amazon, eBay, Shopify, and generic ecommerce sites
+- **🚫 Automatic Popup Handling**: Automatically dismisses cookie banners, privacy dialogs, newsletter popups, and other blocking elements
 - **📊 Structured Data Output**: Standardized product schemas with comprehensive data validation
 - **🔄 Adaptive Scraping**: Automatically adapts to different site structures and layouts
 - **⚡ Cloud Browser Infrastructure**: Powered by Browserbase for reliable, scalable scraping
@@ -318,6 +319,28 @@ examples/                # Usage examples
 └── interactive_scraper.py               # Interactive mode
 tests/                   # Test suite
 ```
+
+## 🚫 Popup Handling
+
+The scraper automatically handles common blocking elements that appear on ecommerce websites:
+
+### Automatic Popup Dismissal
+- **Cookie Consent Banners**: Automatically clicks "Accept All", "I Accept", or "Accept Cookies"
+- **Privacy Policy Dialogs**: Handles GDPR compliance by clicking "Accept" or "Continue"
+- **Newsletter Signup Popups**: Dismisses with "Close", "No Thanks", or "Skip"
+- **Age Verification Prompts**: Handles age gates by clicking "Yes" or entering appropriate age
+- **Location Selection**: Automatically selects "United Kingdom" or "UK" when prompted
+- **Promotional Banners**: Dismisses sale offers and promotional overlays
+- **Mobile App Prompts**: Clicks "Continue in Browser" to stay on web version
+
+### Vendor-Specific Handling
+Each supported vendor has customized popup handling strategies:
+- **ASDA**: Privacy dialog with "I Accept" button, location prompts
+- **Tesco**: Cookie consent, Clubcard signup, age verification for alcohol
+- **Waitrose**: Newsletter overlays, delivery area selection
+- **Next**: Newsletter subscription, size guides, mobile app prompts
+
+See `POPUP_HANDLING_GUIDE.md` for comprehensive documentation.
 
 ## 🔐 Stagehand Best Practices
 

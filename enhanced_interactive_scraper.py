@@ -3,6 +3,10 @@
 
 import json
 import os
+import signal
+import sys
+import threading
+import time
 from typing import List, Dict, Any
 from datetime import datetime
 from pathlib import Path
@@ -18,7 +22,65 @@ from ecommerce_scraper.config.settings import settings
 from ecommerce_scraper.config.sites import get_site_config_by_vendor, get_supported_uk_vendors
 from ecommerce_scraper.state.state_manager import StateManager, PaginationState
 
+# Try to import keyboard library for ESC detection (optional)
+try:
+    import keyboard
+    KEYBOARD_AVAILABLE = True
+except ImportError:
+    KEYBOARD_AVAILABLE = False
+
 console = Console()
+
+# Global flag for graceful termination
+_termination_requested = False
+_scraper_instance = None
+
+def signal_handler(signum, frame):
+    """Handle Ctrl+C (SIGINT) gracefully."""
+    global _termination_requested, _scraper_instance
+    console.print("\n🛑 [red]Termination requested (Ctrl+C detected)...[/red]")
+    _termination_requested = True
+
+    # Try to gracefully close the scraper if it exists
+    if _scraper_instance:
+        try:
+            console.print("🔄 [yellow]Attempting to close scraper gracefully...[/yellow]")
+            _scraper_instance.close()
+            console.print("✅ [green]Scraper closed successfully[/green]")
+        except Exception as e:
+            console.print(f"⚠️ [yellow]Error closing scraper: {e}[/yellow]")
+
+    console.print("👋 [blue]Exiting gracefully...[/blue]")
+    sys.exit(0)
+
+def esc_key_listener():
+    """Listen for ESC key press in a separate thread."""
+    global _termination_requested
+    if not KEYBOARD_AVAILABLE:
+        return
+
+    try:
+        while not _termination_requested:
+            if keyboard.is_pressed('esc'):
+                console.print("\n🛑 [red]ESC key detected - requesting termination...[/red]")
+                _termination_requested = True
+                break
+            time.sleep(0.1)  # Small delay to prevent high CPU usage
+    except Exception:
+        # Silently handle any keyboard detection errors
+        pass
+
+def start_esc_listener():
+    """Start ESC key listener in a daemon thread."""
+    if KEYBOARD_AVAILABLE:
+        listener_thread = threading.Thread(target=esc_key_listener, daemon=True)
+        listener_thread.start()
+        return listener_thread
+    return None
+
+def check_termination():
+    """Check if termination was requested."""
+    return _termination_requested
 
 # UK Retail Vendor Configuration
 UK_VENDORS = {
@@ -448,6 +510,13 @@ def display_scraping_plan(plan: Dict[str, Any]):
 
 def execute_scraping_plan(plan: Dict[str, Any], scraping_urls: List[Dict[str, Any]], scope: str):
     """Execute the scraping plan using CrewAI's dynamic multi-agent orchestration."""
+    global _scraper_instance
+
+    # Check for termination before starting
+    if check_termination():
+        console.print("[yellow]🛑 Termination requested before starting scraping plan[/yellow]")
+        return
+
     console.print(f"\n[bold blue]🤖 Initializing dynamic multi-agent scraping...[/bold blue]")
     console.print(f"[cyan]📋 Session ID: {plan['session_id']}[/cyan]")
     console.print(f"[cyan]🎯 Scope: {SCRAPING_SCOPES[scope]['name']}[/cyan]")
@@ -487,11 +556,23 @@ def execute_scraping_plan(plan: Dict[str, Any], scraping_urls: List[Dict[str, An
     # Use context manager for proper resource cleanup
     try:
         with EcommerceScraper(verbose=True) as ecommerce_scraper:
+            _scraper_instance = ecommerce_scraper  # Store reference for signal handler
+
             # Process each vendor's categories
             for vendor, categories in vendor_categories.items():
+                # Check for termination before processing each vendor
+                if check_termination():
+                    console.print(f"[yellow]🛑 Termination requested while processing {vendor}[/yellow]")
+                    break
+
                 console.print(f"\n[cyan]🏪 Processing {vendor.upper()} ({len(categories)} categories)[/cyan]")
 
                 for category in categories:
+                    # Check for termination before processing each category
+                    if check_termination():
+                        console.print(f"[yellow]🛑 Termination requested while processing {category['category_name']}[/yellow]")
+                        break
+
                     console.print(f"[blue]📂 Scraping: {category['category_name']}[/blue]")
 
                     with Progress(
@@ -513,6 +594,11 @@ def execute_scraping_plan(plan: Dict[str, Any], scraping_urls: List[Dict[str, An
                         )
 
                         progress.update(task, completed=1, total=1)
+
+                    # Check for termination after scraping
+                    if check_termination():
+                        console.print(f"[yellow]🛑 Termination requested after scraping {category['category_name']}[/yellow]")
+                        break
 
                     # Process result
                     all_results.append(result)
@@ -561,18 +647,34 @@ def execute_scraping_plan(plan: Dict[str, Any], scraping_urls: List[Dict[str, An
 
 def main():
     """Main enhanced interactive scraping workflow."""
+    global _scraper_instance
+
     try:
         # Welcome and setup
         show_welcome()
 
+        # Check for termination before starting
+        if check_termination():
+            console.print("[yellow]🛑 Termination requested before starting[/yellow]")
+            return
+
         # Step 1: Vendor Selection
         selected_vendors = select_vendors()
-        
+
+        # Check for termination after vendor selection
+        if check_termination():
+            console.print("[yellow]🛑 Termination requested during vendor selection[/yellow]")
+            return
+
         # Step 2: Category Discovery and Selection
         console.print(f"\n[bold yellow]Step 2: Category Discovery[/bold yellow]")
         vendor_categories = {}
-        
+
         for vendor_id in selected_vendors:
+            # Check for termination in the loop
+            if check_termination():
+                console.print("[yellow]🛑 Termination requested during category discovery[/yellow]")
+                return
             categories = discover_categories_for_vendor(vendor_id)
             selected_category_ids = select_categories_for_vendor(vendor_id, categories)
 
@@ -606,16 +708,36 @@ def main():
 
             vendor_categories[vendor_id] = final_categories
         
+        # Check for termination before scope selection
+        if check_termination():
+            console.print("[yellow]🛑 Termination requested before scope selection[/yellow]")
+            return
+
         # Step 3: Scraping Scope
         scope = select_scraping_scope()
-        
+
+        # Check for termination after scope selection
+        if check_termination():
+            console.print("[yellow]🛑 Termination requested after scope selection[/yellow]")
+            return
+
         # Step 4: Create and Display Plan
         plan = create_scraping_plan(selected_vendors, vendor_categories, scope)
         display_scraping_plan(plan)
-        
+
+        # Check for termination before final confirmation
+        if check_termination():
+            console.print("[yellow]🛑 Termination requested before confirmation[/yellow]")
+            return
+
         # Final confirmation
         if not Confirm.ask("\n[bold]Start scraping with this plan?[/bold]", default=True):
             console.print("[yellow]❌ Scraping cancelled by user.[/yellow]")
+            return
+
+        # Check for termination before starting scraping
+        if check_termination():
+            console.print("[yellow]🛑 Termination requested before starting scraping[/yellow]")
             return
 
         # Execute scraping plan
@@ -640,11 +762,36 @@ def main():
         with open(plan_file, 'w') as f:
             json.dump(plan, f, indent=2)
         console.print(f"[blue]📄 Plan saved to: {plan_file}[/blue]")
-        
+
     except KeyboardInterrupt:
-        console.print("\n[yellow]❌ Scraping interrupted by user.[/yellow]")
+        console.print("\n[yellow]🛑 Scraping interrupted by user (Ctrl+C).[/yellow]")
     except Exception as e:
-        console.print(f"\n[red]❌ Error: {e}[/red]")
+        if check_termination():
+            console.print("\n[yellow]🛑 Scraping terminated gracefully[/yellow]")
+        else:
+            console.print(f"\n[red]❌ Error: {e}[/red]")
+    finally:
+        # Clear the scraper instance reference
+        _scraper_instance = None
 
 if __name__ == "__main__":
-    main()
+    # Register signal handler for Ctrl+C
+    signal.signal(signal.SIGINT, signal_handler)
+
+    # Start ESC key listener if available
+    esc_thread = start_esc_listener()
+
+    # Display startup message
+    console.print("[bold blue]🚀 Enhanced Interactive Ecommerce Scraper[/bold blue]")
+    if KEYBOARD_AVAILABLE:
+        console.print("[dim]💡 Press Ctrl+C or ESC at any time to gracefully terminate[/dim]")
+    else:
+        console.print("[dim]💡 Press Ctrl+C at any time to gracefully terminate[/dim]")
+        console.print("[dim]ℹ️ Install 'keyboard' package for ESC key support: pip install keyboard[/dim]")
+    console.print()
+
+    try:
+        main()
+    except KeyboardInterrupt:
+        console.print("\n[yellow]🛑 Scraper interrupted by user[/yellow]")
+        sys.exit(130)  # Standard exit code for SIGINT

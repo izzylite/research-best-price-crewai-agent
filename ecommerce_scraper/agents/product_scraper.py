@@ -84,11 +84,21 @@ class ProductScraperAgent:
 
         CRITICAL REQUIREMENTS:
         1. Use the Web Automation Tool (Stagehand) to navigate directly to the category URL: {category_url}
-        2. Extract data using the StandardizedProduct schema format
-        3. Report progress to the progress tracker if available
-        4. Handle vendor-specific navigation patterns and anti-bot measures
-        5. Respect rate limits: {site_config.delay_between_requests} seconds between requests
-        6. Use vendor-specific selectors and extraction patterns
+        2. **IMMEDIATELY handle any blocking popups, banners, or dialogs:**
+           - Cookie consent banners (click "Accept All", "I Accept", "Accept Cookies")
+           - Privacy policy dialogs (click "Accept", "Continue", "I Agree")
+           - Newsletter signup popups (click "Close", "No Thanks", "Skip", "X")
+           - Age verification prompts (enter appropriate age or click "Yes")
+           - Location/country selection (select UK/United Kingdom if prompted)
+           - GDPR compliance banners (click "Accept" or "Continue")
+           - Promotional banners/offers (click "Close", "Dismiss", "No Thanks")
+           - Mobile app download prompts (click "Continue in Browser", "Not Now")
+        3. **VERIFY the main product listing is visible and accessible before proceeding**
+        4. Extract data using the StandardizedProduct schema format
+        5. Report progress to the progress tracker if available
+        6. Handle vendor-specific navigation patterns and anti-bot measures
+        7. Respect rate limits: {site_config.delay_between_requests} seconds between requests
+        8. Use vendor-specific selectors and extraction patterns
 
         Data must be extracted in this exact StandardizedProduct format:
         {{
