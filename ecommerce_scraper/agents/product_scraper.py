@@ -2,7 +2,7 @@
 
 from typing import List, Optional, Dict, Any
 from crewai import Agent, LLM
-
+from ..config.settings import settings
 from ..state.state_manager import StateManager
 from ..progress.progress_tracker import ProgressTracker
 from ..config.sites import get_site_config_by_vendor, SiteConfig
@@ -50,7 +50,7 @@ class ProductScraperAgent:
             "allow_delegation": True,
             "tools": tools,
             "max_iter": 5,
-            "memory": False
+            "memory": settings.enable_crew_memory
         }
 
         if llm:

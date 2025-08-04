@@ -3,7 +3,7 @@
 from typing import List, Optional, Dict, Any
 from crewai import Agent, LLM
 from pydantic import BaseModel
-
+from ..config.settings import settings
 
 class ValidationResult(BaseModel):
     """Pydantic model for validation task output."""
@@ -45,7 +45,7 @@ class DataValidatorAgent:
             "allow_delegation": False,
             "tools": tools,
             "max_iter": 3,
-            "memory": False
+            "memory": settings.enable_crew_memory
         }
 
         if llm:
