@@ -1,5 +1,6 @@
 """State management system for multi-vendor ecommerce scraping with pagination and resume functionality."""
 
+import hashlib
 import json
 import os
 import uuid
@@ -155,10 +156,29 @@ class StateManager:
     def _get_state_filename(self, session_id: str, vendor: str, category: str) -> Path:
         """Get filename for state file."""
         # Clean vendor and category names for safe filenames
-        safe_vendor = vendor.replace('/', '_').replace('\\', '_').replace(':', '_').replace('*', '_').replace('?', '_').replace('"', '_').replace('<', '_').replace('>', '_').replace('|', '_')
-        safe_category = category.replace('/', '_').replace('\\', '_').replace(':', '_').replace('*', '_').replace('?', '_').replace('"', '_').replace('<', '_').replace('>', '_').replace('|', '_').replace(',', '_').replace('&', 'and').replace(' ', '_')
-        return self.state_dir / f"{session_id}_{safe_vendor}_{safe_category}.json"
-    
+        def sanitize_filename(s: str) -> str:
+            # Replace problematic characters with underscores
+            invalid_chars = '<>:"/\\|?*'
+            # First replace spaces and special characters
+            s = s.replace(' ', '_').replace('&', 'and').replace(',', '')
+            # Then replace any remaining invalid characters
+            for char in invalid_chars:
+                s = s.replace(char, '_')
+            # Remove multiple consecutive underscores
+            while '__' in s:
+                s = s.replace('__', '_')
+            # Remove leading/trailing underscores
+            s = s.strip('_')
+            return s
+
+        safe_vendor = sanitize_filename(vendor)
+        safe_category = sanitize_filename(category)
+        
+        # Create a hash of the original category name to ensure uniqueness
+        category_hash = hashlib.md5(category.encode()).hexdigest()[:8]
+        
+        return self.state_dir / f"{session_id}_{safe_vendor}_{safe_category}_{category_hash}.json"
+   
     def _load_existing_sessions(self):
         """Load existing session states from disk."""
         try:

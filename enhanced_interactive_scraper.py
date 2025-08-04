@@ -11,6 +11,15 @@ from typing import List, Dict, Any
 from datetime import datetime
 from pathlib import Path
 
+# Load environment variables first
+from dotenv import load_dotenv
+load_dotenv()
+
+# Ensure OpenAI API key is available for CrewAI
+openai_key = os.getenv("OPENAI_API_KEY")
+if openai_key:
+    os.environ["OPENAI_API_KEY"] = openai_key
+
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table

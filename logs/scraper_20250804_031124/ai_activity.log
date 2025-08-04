@@ -1,2 +1,0 @@
-2025-08-04 03:11:24,499 - ai_logger_scraper_20250804_031124 - INFO - AI Logger initialized for session: scraper_20250804_031124
-2025-08-04 03:11:26,770 - ai_logger_scraper_20250804_031124 - INFO - TASK [CrewAI_System] crew_category_20250804_031124: CREW_STARTED - Crew execution started with 3 agents and 3 tasks

@@ -74,48 +74,32 @@ class ProductScraperAgent:
             raise ValueError(f"No configuration found for vendor: {vendor}")
 
         task_description = f"""
-        Scrape products from {category_url} using standardized data extraction.
+        Scrape products from the specified category using the URL Provider Tool and Web Automation Tool.
 
         Vendor: {vendor}
         Category: {category}
         Session ID: {session_id}
         Max Pages: {max_pages or 'unlimited'}
-        Direct Category URL: {category_url}
 
-        CRITICAL REQUIREMENTS:
-        1. Use the Web Automation Tool (Stagehand) to navigate directly to the category URL: {category_url}
-        2. **IMMEDIATELY handle any blocking popups, banners, or dialogs:**
-           - Cookie consent banners (click "Accept All", "I Accept", "Accept Cookies")
-           - Privacy policy dialogs (click "Accept", "Continue", "I Agree")
-           - Newsletter signup popups (click "Close", "No Thanks", "Skip", "X")
-           - Age verification prompts (enter appropriate age or click "Yes")
-           - Location/country selection (select UK/United Kingdom if prompted)
-           - GDPR compliance banners (click "Accept" or "Continue")
-           - Promotional banners/offers (click "Close", "Dismiss", "No Thanks")
-           - Mobile app download prompts (click "Continue in Browser", "Not Now")
-        3. **VERIFY the main product listing is visible and accessible before proceeding**
-        4. Extract data using the StandardizedProduct schema format
-        5. Report progress to the progress tracker if available
-        6. Handle vendor-specific navigation patterns and anti-bot measures
-        7. Respect rate limits: {site_config.delay_between_requests} seconds between requests
-        8. Use vendor-specific selectors and extraction patterns
+        CRITICAL REQUIREMENTS - FOLLOW EXACTLY:
+        1. **FIRST**: Use the "Category URL Provider" tool to get the exact URL
+        2. **THEN**: Use the Web Automation Tool to navigate to that URL
+        4. **ALWAYS**: Get the URL from the URL Provider tool first
 
-        Data must be extracted in this exact StandardizedProduct format:
-        {{
-            "name": "Product title/name",
-            "description": "Product description",
-            "price": {{
-                "current": 10.99,
-                "currency": "GBP",
-                "original": 15.99,
-                "discount_percentage": 33.3
-            }},
-            "image_url": "Primary product image URL",
-            "category": "{category}",
-            "vendor": "{vendor}",
-            "weight": "Product weight if available",
-            "scraped_at": "ISO timestamp"
-        }}
+        STEP-BY-STEP PROCESS:
+        1. **STEP 1**: Use "Category URL Provider" tool with request_type="get_category_url"
+        2. **STEP 2**: Copy the EXACT URL from the tool response
+        3. **STEP 3**: Use Web Automation Tool to navigate to that exact URL
+        4. **STEP 4**: Handle any popups, banners, or consent dialogs immediately
+        5. **STEP 5**: Verify the main product listing is visible and accessible
+        6. **STEP 6**: Extract product data using StandardizedProduct schema format
+        7. **STEP 7**: Handle pagination if max_pages allows multiple pages
+
+        IMPORTANT NOTES:
+        - The URL Provider tool will give you the complete, untruncated URL
+        - Use it exactly as provided without any modifications
+        - Respect rate limits: {site_config.delay_between_requests} seconds between requests
+        - Use vendor-specific selectors and extraction patterns
 
         Handle pagination by:
         1. Extracting products from current page
@@ -129,7 +113,7 @@ class ProductScraperAgent:
             agent=self.agent,
             expected_output="""
             A JSON object containing:
-            - products: Array of StandardizedProduct objects
+            - products: Array of all products details found on the page
             - metadata: {{
                 "vendor": vendor name,
                 "category": category name,

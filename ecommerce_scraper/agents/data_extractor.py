@@ -88,13 +88,7 @@ class DataExtractorAgent:
         }}
 
         EXTRACTION REQUIREMENTS:
-        1. **FIRST: Check for and dismiss any blocking popups or overlays:**
-           - Cookie consent banners (click "Accept All", "I Accept")
-           - Privacy dialogs (click "Accept", "Continue")
-           - Newsletter popups (click "Close", "No Thanks", "X")
-           - Promotional overlays (click "Close", "Dismiss")
-           - Age verification prompts (handle appropriately)
-           - Location selection (choose UK if prompted)
+        1. **FIRST: Check for and dismiss any blocking popups or overlays and close them immediately**  
         2. **VERIFY the product listing is fully visible and accessible**
         3. Extract ALL products visible on the current page
         4. Use vendor-specific selectors and patterns when available

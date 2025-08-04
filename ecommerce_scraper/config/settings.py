@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     # LLM Configuration
     openai_api_key: Optional[str] = Field(None, env="OPENAI_API_KEY")
     anthropic_api_key: Optional[str] = Field(None, env="ANTHROPIC_API_KEY")
+    google_api_key: Optional[str] = Field(None, env="GOOGLE_API_KEY")
     
     # Stagehand Configuration
     stagehand_model_name: str = Field("gpt-4o", env="STAGEHAND_MODEL_NAME")
@@ -41,6 +42,9 @@ class Settings(BaseSettings):
     # Logging Configuration
     log_level: str = Field("INFO", env="LOG_LEVEL")
     log_format: str = Field("%(asctime)s - %(name)s - %(levelname)s - %(message)s", env="LOG_FORMAT")
+
+    # CrewAI Configuration
+    enable_crew_memory: bool = Field(False, env="ENABLE_CREW_MEMORY")
     
     @field_validator('browserbase_api_key', 'browserbase_project_id')
     @classmethod
@@ -65,19 +69,24 @@ class Settings(BaseSettings):
     
     def get_model_api_key(self) -> str:
         """Get the appropriate API key based on the selected model."""
-        if "gpt" in self.stagehand_model_name.lower():
+        model_name = self.stagehand_model_name.lower()
+        if "gpt" in model_name:
             if not self.openai_api_key:
                 raise ValueError("OpenAI API key is required for GPT models")
             return self.openai_api_key
-        elif "claude" in self.stagehand_model_name.lower():
+        elif "claude" in model_name:
             if not self.anthropic_api_key:
                 raise ValueError("Anthropic API key is required for Claude models")
             return self.anthropic_api_key
+        elif "gemini" in model_name:
+            if not self.google_api_key:
+                raise ValueError("Google API key is required for Gemini models")
+            return self.google_api_key
         else:
-            # Default to OpenAI if model type is unclear
-            if not self.openai_api_key:
-                raise ValueError("OpenAI API key is required")
-            return self.openai_api_key
+            # Default to OpenAI if model type is unclear, but check for key
+            if self.openai_api_key:
+                return self.openai_api_key
+            raise ValueError("Could not determine model type and no default API key is available.")
 
     def setup_logging(self) -> None:
         """Setup logging configuration."""
@@ -94,7 +103,7 @@ class Settings(BaseSettings):
         """Get configuration without sensitive data for logging."""
         config = self.model_dump()
         # Remove sensitive fields
-        sensitive_fields = ['browserbase_api_key', 'openai_api_key', 'anthropic_api_key']
+        sensitive_fields = ['browserbase_api_key', 'openai_api_key', 'anthropic_api_key', 'google_api_key']
         for field in sensitive_fields:
             if field in config and config[field]:
                 config[field] = f"{config[field][:8]}..." if len(config[field]) > 8 else "***"

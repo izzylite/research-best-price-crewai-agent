@@ -1,4 +1,0 @@
-2025-08-03 23:54:48,090 - ai_logger_scraper_20250803_235448 - INFO - AI Logger initialized for session: scraper_20250803_235448
-2025-08-03 23:54:50,125 - ai_logger_scraper_20250803_235448 - INFO - TOOL [Multi-Vendor Product Scraping Coordinator] ecommerce_stagehand_tool.close: SUCCESS
-2025-08-03 23:54:50,136 - ai_logger_scraper_20250803_235448 - INFO - Session summary saved: logs\scraper_20250803_235448\session_summary.json
-2025-08-03 23:54:50,137 - ai_logger_scraper_20250803_235448 - INFO - AI Logger session closed: scraper_20250803_235448
