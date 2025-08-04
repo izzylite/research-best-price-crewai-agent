@@ -114,7 +114,7 @@ class EcommerceScraper:
             "api_key": settings.browserbase_api_key,
             "project_id": settings.browserbase_project_id,
             "model_api_key": settings.openai_api_key,
-            "model_name": AvailableModel.GPT_4O,
+            "model_name": AvailableModel.GEMINI_2_0_FLASH,
             "dom_settle_timeout_ms": settings.stagehand_dom_settle_timeout_ms,
             "headless": settings.stagehand_headless,
             "verbose": settings.stagehand_verbose if verbose else 0
