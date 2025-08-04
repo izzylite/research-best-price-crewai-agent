@@ -14,71 +14,43 @@ from pydantic import BaseModel, Field
 from ..config.settings import settings
 
 
+# Global persistent event loop for Stagehand operations
+_stagehand_loop = None
+_stagehand_thread = None
+_loop_lock = asyncio.Lock() if hasattr(asyncio, 'Lock') else None
+
+def _get_persistent_loop():
+    """Get or create a persistent event loop for Stagehand operations."""
+    global _stagehand_loop, _stagehand_thread
+    import threading
+
+    if _stagehand_loop is None or _stagehand_loop.is_closed():
+        def create_loop():
+            global _stagehand_loop
+            _stagehand_loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(_stagehand_loop)
+            _stagehand_loop.run_forever()
+
+        _stagehand_thread = threading.Thread(target=create_loop, daemon=True)
+        _stagehand_thread.start()
+
+        # Wait for loop to be ready
+        import time
+        while _stagehand_loop is None:
+            time.sleep(0.01)
+
+    return _stagehand_loop
+
 def run_async_safely(coro):
     """
-    Enhanced async handling for Stagehand operations with persistent event loop support.
-    Handles nested event loop scenarios and event loop closure issues robustly.
+    Run async operations in a persistent event loop to maintain session context.
+    This fixes the root cause by ensuring all Stagehand operations use the same event loop.
     """
-    import threading
-    import concurrent.futures
+    loop = _get_persistent_loop()
 
-    # Get current thread info for debugging
-    current_thread = threading.current_thread()
-    thread_name = current_thread.name
-
-    try:
-        # Check if we're in the main thread and if there's already a running loop
-        try:
-            asyncio.get_running_loop()
-            # If we have a running loop, try to use it with nest_asyncio
-            try:
-                import nest_asyncio
-                nest_asyncio.apply()
-                # Create a task in the current loop
-                return asyncio.run(coro)
-            except ImportError:
-                # Use thread executor as fallback
-                with concurrent.futures.ThreadPoolExecutor() as executor:
-                    future = executor.submit(asyncio.run, coro)
-                    return future.result()
-        except RuntimeError:
-            # No running loop, try standard approach
-            return asyncio.run(coro)
-
-    except RuntimeError as e:
-        error_msg = str(e)
-
-        if "Event loop is closed" in error_msg:
-            # Event loop was closed, create a new one in a separate thread
-            print(f"⚠️ Event loop closed in thread {thread_name}, using thread executor...")
-
-            def run_in_new_loop():
-                # Create a fresh event loop in this thread
-                new_loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(new_loop)
-                try:
-                    return new_loop.run_until_complete(coro)
-                finally:
-                    new_loop.close()
-
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                future = executor.submit(run_in_new_loop)
-                return future.result()
-
-        elif "asyncio.run() cannot be called from a running event loop" in error_msg:
-            # Handle nested event loop case with nest_asyncio
-            try:
-                import nest_asyncio
-                nest_asyncio.apply()
-                return asyncio.run(coro)
-            except ImportError:
-                # Fallback: use thread executor if nest_asyncio not available
-                with concurrent.futures.ThreadPoolExecutor() as executor:
-                    future = executor.submit(asyncio.run, coro)
-                    return future.result()
-        else:
-            # Re-raise other RuntimeErrors
-            raise
+    # Submit the coroutine to the persistent loop
+    future = asyncio.run_coroutine_threadsafe(coro, loop)
+    return future.result()
 
 
 class StagehandInput(BaseModel):
@@ -195,32 +167,12 @@ class EcommerceStagehandTool(BaseTool):
                 self._stagehand = None
                 raise
 
-        # Verify the Stagehand instance is still valid
-        try:
-            if hasattr(self._stagehand, 'page') and self._stagehand.page is None:
-                self._logger.warning("Stagehand page is None, but keeping existing session...")
-                # Don't reinitialize - just log the issue
-        except Exception as e:
-            self._logger.warning(f"Stagehand validation failed: {e}")
-            # Don't reinitialize - let the retry logic handle it
-
         return self._stagehand
 
     def _safe_async_call(self, async_func, *args, **kwargs):
-        """Safely call an async function, ensuring fresh coroutines are created."""
-        try:
-            # Create a fresh coroutine each time
-            coro = async_func(*args, **kwargs)
-            return run_async_safely(coro)
-        except Exception as e:
-            # Handle coroutine reuse errors
-            if "cannot reuse already awaited coroutine" in str(e):
-                self._logger.warning("Coroutine reuse detected, creating fresh coroutine...")
-                # Create a completely fresh coroutine
-                coro = async_func(*args, **kwargs)
-                return run_async_safely(coro)
-            else:
-                raise
+        """Safely call an async function with proper isolation."""
+        coro = async_func(*args, **kwargs)
+        return run_async_safely(coro)
 
     def _run(self, **kwargs) -> str:
         """Execute the Stagehand command with best practices."""
