@@ -1,0 +1,19 @@
+# Test dependencies for enhanced architecture
+pytest>=7.0.0
+pytest-cov>=4.0.0
+pytest-mock>=3.10.0
+pytest-asyncio>=0.21.0
+pytest-xdist>=3.0.0  # For parallel test execution
+
+# Rich for enhanced test output
+rich>=13.0.0
+
+# Additional testing utilities
+coverage>=7.0.0
+mock>=4.0.0
+
+# Performance testing
+psutil>=5.9.0  # For performance metrics testing
+
+# Temporary file handling
+tempfile  # Built-in, but listed for clarity

@@ -99,18 +99,47 @@ class EcommerceStagehandTool(BaseTool):
     """
     args_schema: type[BaseModel] = StagehandInput
 
-    def __init__(self, **kwargs):
+    def __init__(self, session_id: Optional[str] = None, viewport_width: int = 1920, viewport_height: int = 1080, **kwargs):
         super().__init__(**kwargs)
         self._stagehand: Optional[Stagehand] = None
         self._current_url: Optional[str] = None
         self._cache: Dict[str, Any] = {}
         self._logger = logging.getLogger(__name__)
+        self._schema_registry = self._build_schema_registry()
+
+        # Session sharing and viewport configuration
+        self._session_id = session_id
+        self._viewport_width = viewport_width
+        self._viewport_height = viewport_height
+
+        if session_id:
+            self._logger.info(f"[SESSION] EcommerceStagehandTool configured to reuse session: {session_id}")
+        self._logger.info(f"[VIEWPORT] Viewport configured: {viewport_width}x{viewport_height}")
 
         # Setup logging if not already configured
         if not self._logger.handlers:
             settings.setup_logging()
 
+    def _build_schema_registry(self) -> Dict[str, Any]:
+        """Build registry of available schemas for string resolution."""
+        try:
+            from ..schemas.standardized_product import StandardizedProduct
+            return {
+                "StandardizedProduct": StandardizedProduct,
+                "standardized_product": StandardizedProduct,
+                "product": StandardizedProduct
+            }
+        except ImportError as e:
+            self._logger.warning(f"Failed to import schemas: {e}")
+            return {}
 
+    def _resolve_schema(self, schema_name: str) -> Any:
+        """Resolve schema name to actual Pydantic model class."""
+        if schema_name in self._schema_registry:
+            return self._schema_registry[schema_name]
+        else:
+            self._logger.warning(f"Unknown schema name: {schema_name}")
+            return None
 
     def _get_cache_key(self, instruction: str, url: Optional[str] = None, command_type: str = "act") -> str:
         """Generate cache key for operation."""
@@ -145,29 +174,78 @@ class EcommerceStagehandTool(BaseTool):
             model_name = getattr(AvailableModel, settings.stagehand_model_name.upper().replace('-', '_'),
                                 AvailableModel.GPT_4O)
 
-            self._stagehand = Stagehand(
-                api_key=settings.browserbase_api_key,
-                project_id=settings.browserbase_project_id,
-                model_api_key=settings.get_model_api_key(),
-                model_name=model_name,
-                dom_settle_timeout_ms=settings.stagehand_dom_settle_timeout_ms,
-                headless=settings.stagehand_headless,
-                verbose=settings.stagehand_verbose,
-                self_heal=True,
-                wait_for_captcha_solves=True,
-            )
+            # Configure viewport and session sharing
+            stagehand_config = {
+                "api_key": settings.browserbase_api_key,
+                "project_id": settings.browserbase_project_id,
+                "model_api_key": settings.get_model_api_key(),
+                "model_name": model_name,
+                "dom_settle_timeout_ms": settings.stagehand_dom_settle_timeout_ms,
+                "headless": settings.stagehand_headless,
+                "verbose": settings.stagehand_verbose,
+                "self_heal": True,
+                "wait_for_captcha_solves": True,
+            }
+
+            # Add viewport configuration for better extraction coverage
+            if hasattr(settings, 'browserbase_session_create_params'):
+                stagehand_config["browserbase_session_create_params"] = settings.browserbase_session_create_params
+            else:
+                stagehand_config["browserbase_session_create_params"] = {
+                    "project_id": settings.browserbase_project_id,
+                    "browser_settings": {
+                        "viewport": {
+                            "width": self._viewport_width,
+                            "height": self._viewport_height,
+                        },
+                        "fingerprint": {
+                            "screen": {
+                                "max_width": self._viewport_width,
+                                "max_height": self._viewport_height,
+                                "min_width": self._viewport_width,
+                                "min_height": self._viewport_height,
+                            },
+                            "viewport": {
+                                "width": self._viewport_width,
+                                "height": self._viewport_height,
+                            },
+                        },
+                        "block_ads": True,
+                    },
+                }
+
+            # Add session ID for session sharing if provided
+            if self._session_id:
+                stagehand_config["browserbase_session_id"] = self._session_id
+                self._logger.info(f"[SESSION] Reusing Browserbase session: {self._session_id}")
+
+            self._stagehand = Stagehand(**stagehand_config)
 
             # Initialize Stagehand using enhanced async wrapper
             try:
-                print("🔄 Initializing Stagehand session...")
+                print("[INIT] Initializing Stagehand session...")
                 run_async_safely(self._stagehand.init())
-                print("✅ Stagehand session initialized successfully")
+                print("[SUCCESS] Stagehand session initialized successfully")
             except Exception as e:
-                print(f"❌ Error: Failed to initialize Stagehand: {e}")
+                print(f"[ERROR] Failed to initialize Stagehand: {e}")
                 self._stagehand = None
                 raise
 
         return self._stagehand
+
+    def get_session_id(self) -> Optional[str]:
+        """Get the current Browserbase session ID for sharing between agents."""
+        try:
+            if self._stagehand and hasattr(self._stagehand, 'session_id'):
+                return self._stagehand.session_id
+            elif self._stagehand and hasattr(self._stagehand, '_session_id'):
+                return self._stagehand._session_id
+            else:
+                self._logger.warning("[WARNING] Session ID not available - Stagehand may not be initialized")
+                return None
+        except Exception as e:
+            self._logger.error(f"[ERROR] Error getting session ID: {e}")
+            return None
 
     def _safe_async_call(self, async_func, *args, **kwargs):
         """Safely call an async function with proper isolation."""
@@ -288,6 +366,10 @@ class EcommerceStagehandTool(BaseTool):
                     # Check if we should use structured schema extraction
                     schema = kwargs.get("extraction_schema")
                     if schema:
+                        # Resolve schema if it's a string name
+                        if isinstance(schema, str):
+                            schema = self._resolve_schema(schema)
+
                         # Use Pydantic schema for structured extraction
                         if selector:
                             result = self._safe_async_call(stagehand.page.extract,
@@ -504,7 +586,7 @@ class EcommerceStagehandTool(BaseTool):
                 run_async_safely(self._stagehand.close())
                 self._logger.info("Browserbase session closed successfully")
             except Exception as e:
-                self._logger.warning(f"⚠️ Warning: Error closing Stagehand session: {e}")
+                self._logger.warning(f"[WARNING] Error closing Stagehand session: {e}")
             finally:
                 self._stagehand = None
                 self._current_url = None

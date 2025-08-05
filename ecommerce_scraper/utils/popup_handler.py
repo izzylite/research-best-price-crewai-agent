@@ -97,16 +97,25 @@ class PopupHandler:
         
         3. For each popup type, try these actions:
            - Cookie consent: "Accept All", "I Accept", "Accept Cookies"
-           - Privacy dialogs: "Accept", "I Agree", "Continue"
+           - Privacy dialogs: "Accept", "I Agree", "Continue" (ONLY in modal dialogs, NOT footer links)
            - Newsletter: "Close", "No Thanks", "Skip", "X"
            - Age verification: "Yes", "I am 18+", enter "25"
            - Location: "United Kingdom", "UK", "Continue"
            - Promotions: "Close", "Dismiss", "No Thanks"
            - App prompts: "Continue in Browser", "Not Now"
+
+        CRITICAL: DO NOT CLICK THESE ELEMENTS (they are navigation, not popups):
+           - "Register", "Sign In", "Login", "Create Account", "Sign Up"
+           - "Privacy Policy", "Terms", "Cookies" links in footer or navigation
+           - Any links that will navigate away from the product page
+           - Only click buttons/elements that DISMISS popups, not navigate to other pages
         
         4. VERIFY main content is accessible before proceeding
         5. If popups persist, try alternative dismiss strategies
         6. Wait 2-3 seconds between attempts
+        7. CRITICAL: Check current URL - if on login.asda.com or similar, navigate back to product page
+        8. AVOID footer elements - only interact with modal dialogs and overlay popups
+        9. If no actual popups are found, proceed to next step (don't click random links)
         """
     
     @staticmethod

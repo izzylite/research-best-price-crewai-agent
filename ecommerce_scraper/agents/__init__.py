@@ -1,8 +1,7 @@
-"""Agents module for ecommerce scraper."""
+"""Agents module for enhanced ecommerce scraper."""
 
-from .product_scraper import ProductScraperAgent
-from .site_navigator import SiteNavigatorAgent
-from .data_extractor import DataExtractorAgent
-from .data_validator import DataValidatorAgent
+from .navigation_agent import NavigationAgent
+from .extraction_agent import ExtractionAgent
+from .validation_agent import ValidationAgent
 
-__all__ = ["ProductScraperAgent", "SiteNavigatorAgent", "DataExtractorAgent", "DataValidatorAgent"]
+__all__ = ["NavigationAgent", "ExtractionAgent", "ValidationAgent"]

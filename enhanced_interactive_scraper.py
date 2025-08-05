@@ -27,9 +27,7 @@ from rich.prompt import Prompt, Confirm
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
 # Import our scraper components
-from ecommerce_scraper.config.settings import settings
 from ecommerce_scraper.config.sites import get_site_config_by_vendor, get_supported_uk_vendors
-from ecommerce_scraper.state.state_manager import StateManager, PaginationState
 
 # Try to import keyboard library for ESC detection (optional)
 try:
@@ -47,19 +45,19 @@ _scraper_instance = None
 def signal_handler(signum, frame):
     """Handle Ctrl+C (SIGINT) gracefully."""
     global _termination_requested, _scraper_instance
-    console.print("\n🛑 [red]Termination requested (Ctrl+C detected)...[/red]")
+    console.print("\n[STOP] [red]Termination requested (Ctrl+C detected)...[/red]")
     _termination_requested = True
 
     # Try to gracefully close the scraper if it exists
     if _scraper_instance:
         try:
-            console.print("🔄 [yellow]Attempting to close scraper gracefully...[/yellow]")
+            console.print("[CLOSING] [yellow]Attempting to close scraper gracefully...[/yellow]")
             _scraper_instance.close()
-            console.print("✅ [green]Scraper closed successfully[/green]")
+            console.print("[SUCCESS] [green]Scraper closed successfully[/green]")
         except Exception as e:
-            console.print(f"⚠️ [yellow]Error closing scraper: {e}[/yellow]")
+            console.print(f"[WARNING] [yellow]Error closing scraper: {e}[/yellow]")
 
-    console.print("👋 [blue]Exiting gracefully...[/blue]")
+    console.print("[EXIT] [blue]Exiting gracefully...[/blue]")
     sys.exit(0)
 
 def esc_key_listener():
@@ -594,8 +592,8 @@ def execute_scraping_plan(plan: Dict[str, Any], scraping_urls: List[Dict[str, An
                             total=None
                         )
 
-                        # Execute direct scraping for this category URL
-                        result = ecommerce_scraper.scrape_category_directly(
+                        # Execute enhanced scraping for this category URL
+                        result = ecommerce_scraper.scrape_category(
                             category_url=category["url"],
                             vendor=vendor,
                             category_name=category["category_name"],

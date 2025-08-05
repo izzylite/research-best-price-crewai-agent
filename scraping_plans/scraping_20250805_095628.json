@@ -1,0 +1,19 @@
+{
+  "session_id": "scraping_20250805_095628",
+  "created_at": "2025-08-05T09:56:28.414324",
+  "scope": "recent",
+  "vendors": {
+    "asda": {
+      "name": "ASDA",
+      "url": "https://www.asda.com/",
+      "categories": [
+        "Fruit"
+      ],
+      "url_count": 1,
+      "estimated_products": 25
+    }
+  },
+  "total_estimated_products": 25,
+  "estimated_duration_minutes": 2,
+  "total_urls": 1
+}

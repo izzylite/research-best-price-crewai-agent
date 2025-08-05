@@ -95,7 +95,7 @@ class Settings(BaseSettings):
             format=self.log_format,
             handlers=[
                 logging.StreamHandler(),
-                logging.FileHandler('ecommerce_scraper.log')
+                logging.FileHandler('ecommerce_scraper.log', encoding='utf-8')
             ]
         )
 
