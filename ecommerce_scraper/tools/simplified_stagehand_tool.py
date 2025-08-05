@@ -21,35 +21,160 @@ from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
+class SimplifiedStagehandInput(BaseModel):
+    """Input schema for SimplifiedStagehandTool."""
+    operation: str = Field(
+        description="Operation to perform: extract, act, observe, or navigate"
+    )
+    instruction: Optional[str] = Field(
+        default=None,
+        description="Instruction for extract/observe operations"
+    )
+    action: Optional[str] = Field(
+        default=None,
+        description="Action to perform for act operations"
+    )
+    url: Optional[str] = Field(
+        default=None,
+        description="URL to navigate to for navigate operations"
+    )
+    variables: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Variables for action substitution"
+    )
+    return_action: Optional[bool] = Field(
+        default=False,
+        description="Whether to return action suggestions for observe operations"
+    )
+
 class SimplifiedStagehandTool(BaseTool):
     """
     Simplified Stagehand tool following official Browserbase MCP patterns.
-    
+
     This tool provides direct access to Stagehand's core functionality:
     - extract(): Extract structured data from web pages
-    - act(): Perform actions on web elements  
+    - act(): Perform actions on web elements
     - observe(): Observe and identify page elements
     - navigate(): Navigate to URLs
     """
-    
+
     name: str = "simplified_stagehand_tool"
     description: str = """
     Simplified browser automation tool using Stagehand with official API patterns.
-    
+
     Available operations:
     - extract: Extract structured data using natural language instructions
     - act: Perform atomic actions like clicking, typing, scrolling
     - observe: Identify and observe page elements
     - navigate: Navigate to URLs
-    
+
     Use detailed, specific instructions for best results.
     """
-    
+    args_schema: type[BaseModel] = SimplifiedStagehandInput
+
+    def _run(self, **kwargs) -> str:
+        """
+        CrewAI tool entry point - handles all parameters as kwargs.
+
+        This method is called by CrewAI with all parameters as keyword arguments.
+        We need to extract the operation and other parameters from kwargs.
+        """
+        try:
+            # DEBUG: Log all received parameters
+            logger.info(f"[DEBUG] _run called with kwargs={kwargs}")
+
+            # Extract operation from kwargs
+            operation = kwargs.get("operation", "")
+            if not operation:
+                raise ValueError("operation parameter is required")
+
+            # Call the main dispatch method with all kwargs
+            return self._execute_operation(**kwargs)
+
+        except Exception as e:
+            logger.error(f"[ERROR] Tool execution failed: {e}")
+            return f"Error: {str(e)}"
+
+    def _execute_operation(self, **kwargs) -> str:
+        """
+        Main operation dispatch method with simplified operation handling.
+
+        Args:
+            **kwargs: All parameters including operation and operation-specific parameters
+
+        Returns:
+            Operation result as string
+        """
+        try:
+            # DEBUG: Log all received parameters
+            logger.info(f"[DEBUG] _execute_operation called with kwargs={kwargs}")
+
+            # Extract operation from kwargs
+            operation = kwargs.get("operation", "")
+            if not operation:
+                raise ValueError("operation parameter is required")
+
+            logger.info(f"[DEBUG] operation='{operation}'")
+
+            # Handle event loop properly for CrewAI environment
+            import nest_asyncio
+
+            # Check if we're already in an event loop
+            try:
+                loop = asyncio.get_running_loop()
+                # We're in an event loop, use nest_asyncio to allow nested loops
+                nest_asyncio.apply(loop)
+                run_async = loop.run_until_complete
+            except RuntimeError:
+                # No event loop running, create one
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                run_async = loop.run_until_complete
+
+            # Dispatch to appropriate method
+            if operation == "extract":
+                instruction = kwargs.get("instruction", "")
+                logger.info(f"[DEBUG] extract operation - instruction='{instruction}'")
+                if not instruction:
+                    raise ValueError("extract operation requires 'instruction' parameter")
+                return run_async(self.extract(instruction))
+
+            elif operation == "act":
+                action = kwargs.get("action", "")
+                variables = kwargs.get("variables")
+                logger.info(f"[DEBUG] act operation - action='{action}', variables={variables}")
+                if not action:
+                    raise ValueError("act operation requires 'action' parameter")
+                return run_async(self.act(action, variables))
+
+            elif operation == "observe":
+                instruction = kwargs.get("instruction", "")
+                return_action = kwargs.get("return_action", False)
+                logger.info(f"[DEBUG] observe operation - instruction='{instruction}', return_action={return_action}")
+                if not instruction:
+                    logger.error(f"[DEBUG] observe operation failed - instruction is empty or None")
+                    raise ValueError("observe operation requires 'instruction' parameter")
+                return run_async(self.observe(instruction, return_action))
+
+            elif operation == "navigate":
+                url = kwargs.get("url", "")
+                logger.info(f"[DEBUG] navigate operation - url='{url}'")
+                if not url:
+                    raise ValueError("navigate operation requires 'url' parameter")
+                return run_async(self.navigate(url))
+
+            else:
+                raise ValueError(f"Unknown operation: {operation}. Supported: extract, act, observe, navigate")
+
+        except Exception as e:
+            logger.error(f"[ERROR] Operation execution failed: {e}")
+            return f"Error: {str(e)}"
+
     # Tool configuration
     session_id: Optional[str] = Field(default=None, description="Browserbase session ID for session reuse")
     viewport_width: int = Field(default=1920, description="Browser viewport width")
     viewport_height: int = Field(default=1080, description="Browser viewport height")
-    
+
     # Internal state
     _stagehand: Optional[Any] = None
     _session_initialized: bool = False
@@ -280,58 +405,7 @@ class SimplifiedStagehandTool(BaseTool):
             logger.error(f"[NAVIGATE] {error_msg}")
             raise Exception(error_msg)
     
-    def _run(self, operation: str, **kwargs) -> str:
-        """
-        Main tool entry point with simplified operation dispatch.
-        
-        Args:
-            operation: Operation to perform (extract, act, observe, navigate)
-            **kwargs: Operation-specific parameters
-            
-        Returns:
-            Operation result as string
-        """
-        try:
-            # Create event loop if needed
-            try:
-                loop = asyncio.get_event_loop()
-            except RuntimeError:
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-            
-            # Dispatch to appropriate method
-            if operation == "extract":
-                instruction = kwargs.get("instruction", "")
-                if not instruction:
-                    raise ValueError("extract operation requires 'instruction' parameter")
-                return loop.run_until_complete(self.extract(instruction))
-                
-            elif operation == "act":
-                action = kwargs.get("action", "")
-                variables = kwargs.get("variables")
-                if not action:
-                    raise ValueError("act operation requires 'action' parameter")
-                return loop.run_until_complete(self.act(action, variables))
-                
-            elif operation == "observe":
-                instruction = kwargs.get("instruction", "")
-                return_action = kwargs.get("return_action", False)
-                if not instruction:
-                    raise ValueError("observe operation requires 'instruction' parameter")
-                return loop.run_until_complete(self.observe(instruction, return_action))
-                
-            elif operation == "navigate":
-                url = kwargs.get("url", "")
-                if not url:
-                    raise ValueError("navigate operation requires 'url' parameter")
-                return loop.run_until_complete(self.navigate(url))
-                
-            else:
-                raise ValueError(f"Unknown operation: {operation}. Supported: extract, act, observe, navigate")
-                
-        except Exception as e:
-            logger.error(f"[ERROR] Tool execution failed: {e}")
-            return f"Error: {str(e)}"
+
     
     def get_session_id(self) -> Optional[str]:
         """Get the current Browserbase session ID."""

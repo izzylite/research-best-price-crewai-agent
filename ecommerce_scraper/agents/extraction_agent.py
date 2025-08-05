@@ -129,6 +129,11 @@ class ExtractionAgent:
             "scraped_at": "ISO timestamp (auto-generated)"
         }}
 
+        TOOL USAGE INSTRUCTIONS:
+        Use the simplified_stagehand_tool with these specific parameters:
+        - operation: "extract"
+        - instruction: "Extract all product data from the page. For each product, get: name (string), description (string), price (string), image_url (string), weight (string if available). Return valid JSON array."
+
         EXTRACTION REQUIREMENTS (SIMPLIFIED API):
         1. **ASSUME the page is already prepared and ready for extraction**
         2. **DO NOT navigate or handle popups - focus purely on data extraction**
@@ -146,7 +151,7 @@ class ExtractionAgent:
         14. Extract weight information for grocery items when available
 
         EXTRACTION STRATEGY (SIMPLIFIED API FOLLOWING OFFICIAL PATTERNS):
-        - Use operation="extract" with detailed natural language instruction
+        - Use simplified_stagehand_tool with operation="extract" and detailed instruction parameter
         - Extract all products in a single command with clear, specific instruction
         - Follow official Browserbase MCP patterns for direct API usage
         - Navigation Agent has already handled scrolling and made all products visible
@@ -198,14 +203,22 @@ class ExtractionAgent:
               }}
             }}
             
+            CRITICAL: You MUST use the tool name "simplified_stagehand_tool" with the operation parameter.
+
+            EXACT TOOL CALLING FORMAT:
+            Tool: simplified_stagehand_tool
+            Action Input: {{"operation": "extract", "instruction": "Extract all product data from the page. For each product, get: name (string), description (string), price (string), image_url (string), weight (string if available), category '{category}', vendor '{vendor}'. Return valid JSON array with no comments."}}
+
             EXTRACTION PROCESS (SIMPLIFIED API - NO NAVIGATION NEEDED):
             1. The Navigation Agent has already prepared the page - DO NOT navigate again
-            2. Use operation="extract" with this EXACT instruction: "Extract all product data from the page. For each product, get: name (string), description (string - use product name if no description), price (string), image_url (string), weight (string if available), category '{category}', vendor '{vendor}'. Return valid JSON array with no comments."
-            3. If extraction returns empty results, try operation="observe" to check page content first
+            2. Call simplified_stagehand_tool with {{"operation": "extract", "instruction": "Extract all product data from the page. For each product, get: name (string), description (string - use product name if no description), price (string), image_url (string), weight (string if available), category '{category}', vendor '{vendor}'. Return valid JSON array with no comments."}}
+            3. If extraction returns empty results, call simplified_stagehand_tool with {{"operation": "observe", "instruction": "Check page content for products"}} first
             4. CRITICAL: Do NOT repeat the same extraction command - if it fails once, try a different approach or report the issue
             5. Parse the JSON response and convert to StandardizedProduct objects
             6. For missing descriptions, use the product name as description
             7. CRITICAL: Use ONLY real product data from the page, NEVER generate fake data
+
+            REMEMBER: Always use "simplified_stagehand_tool" as the tool name, never use "extract", "observe" as tool names.
 
             EXPECTED RESULTS:
             - Navigation Agent has prepared the page with all products visible

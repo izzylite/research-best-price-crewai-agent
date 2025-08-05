@@ -86,79 +86,34 @@ class NavigationAgent:
         general_popup_instructions = PopupHandler.get_popup_handling_instructions()
 
         task_description = f"""
-        Navigate to the {vendor} {category} category page and prepare it for data extraction.
-        
-        Target URL: {category_url}
-        Vendor: {vendor}
-        Category: {category}
-        Page Number: {page_number}
-        Session ID: {session_id}
+        Navigate to {category_url} and prepare the page for data extraction.
 
-        NAVIGATION SEQUENCE:
-        1. Navigate to the category URL
-        2. Handle all blocking popups and overlays immediately
-        3. Ensure all products on the page are fully loaded and visible
-        4. STAY IN THE PRODUCT LISTING AREA - do not scroll away from products
-        5. Verify the page is ready for extraction by counting visible products
-        6. Signal completion with page status
+        CRITICAL: You MUST use the tool name "simplified_stagehand_tool" with the operation parameter.
 
-        POPUP IDENTIFICATION:
-        - Look for modal dialogs or overlays that block the main content
-        - Identify elements with text like "Your privacy is important", "Accept Cookies", "Newsletter"
-        - Focus on elements that appear as overlays or modal windows
-        - IGNORE header navigation elements, footer links, and account buttons
+        EXACT TOOL CALLING FORMAT:
+        Tool: simplified_stagehand_tool
+        Action Input: {{"operation": "navigate", "url": "{category_url}"}}
 
-        POPUP HANDLING PRIORITY:
-        {general_popup_instructions}
+        Tool: simplified_stagehand_tool
+        Action Input: {{"operation": "act", "action": "Click the Accept button"}}
 
-        VENDOR-SPECIFIC INSTRUCTIONS:
-        {popup_instructions}
+        SIMPLE WORKFLOW:
+        1. Call simplified_stagehand_tool with {{"operation": "navigate", "url": "{category_url}"}}
+        2. Call simplified_stagehand_tool with {{"operation": "act", "action": "Click Accept cookies button"}}
+        3. Return success status
 
-        DYNAMIC CONTENT HANDLING:
-        - Wait for all products to load completely
-        - Ensure all product images and details are visible
-        - Wait for lazy-loaded content to appear
-        - IMPORTANT: Stay within the product listing area while scrolling
-        - IMPORTANT: Do NOT scroll to footer or other page sections
+        POPUP HANDLING:
+        - Use simplified_stagehand_tool with {{"operation": "observe", "instruction": "Find cookie banner or modal dialog"}}
+        - Use simplified_stagehand_tool with {{"operation": "act", "action": "Click I Accept button"}}
+        - Ignore navigation links and footer elements
 
-        PAGE VERIFICATION:
-        - Confirm main product listing is visible
-        - Verify no overlays are blocking content
-        - Check that product cards/items are fully loaded
-        - Count the number of visible products
-        - CRITICAL: Ensure you remain in the product listing area
-        - CRITICAL: Do NOT scroll to footer or other page sections
+        SUCCESS CRITERIA:
+        - Page loads successfully
+        - Popups are dismissed
+        - Products are visible
+        - Page is ready for extraction
 
-        NAVIGATION RECOVERY:
-        - CRITICAL: If you detect you're on login.asda.com or any non-product page
-        - Navigate back to the original category URL immediately
-        - Re-handle any popups that appear after returning
-        - Verify you're back on the correct product listing page
-
-        CRITICAL ELEMENTS TO AVOID (NEVER CLICK THESE):
-        - "Register", "Sign In", "Login", "Create Account", "Sign Up" buttons
-        - "Help Centre", "Customer Service", "Contact Us" links
-        - Navigation menu items like "Groceries", "Offers", "Recipes"
-        - Footer links like "Privacy Policy", "Terms & Conditions"
-        - User account elements in header area
-        - ONLY click elements that are clearly popup dismiss buttons with text like:
-          * "Accept", "Accept All", "I Accept", "Accept Cookies"
-          * "Close", "Dismiss", "No Thanks", "Continue"
-          * "OK", "Got It", "Understood"
-
-        INFINITE SCROLL HANDLING (ASDA SPECIFIC):
-        - ASDA fruit pages initially show ~24 products but contain 60+ total
-        - Scroll down within the product grid area to trigger loading of more products
-        - Continue scrolling until no new products appear (usually 3-4 scroll actions)
-        - Verify final product count is 50+ products for complete page preparation
-        - Stay within product listing boundaries during all scrolling
-
-        CRITICAL WARNINGS:
-        - Do NOT extract any product data. Your job is purely navigation and page preparation.
-        - Do NOT scroll to the footer or bottom of the page looking for pagination
-        - Do NOT leave the product listing area once products are visible
-        - STAY in the main product section where products are displayed
-        - Once the page is ready, return a status indicating the page is prepared for extraction.
+        REMEMBER: Always use "simplified_stagehand_tool" as the tool name, never use "navigate", "act", "observe" as tool names.
         """
 
         return Task(
