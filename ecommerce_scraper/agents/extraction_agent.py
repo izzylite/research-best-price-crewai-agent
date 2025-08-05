@@ -119,14 +119,12 @@ class ExtractionAgent:
             "name": "Product title/name (string, required, min 1 char)",
             "description": "Product description (string, required, min 1 char)",
             "price": {{
-                "current": 10.99,  // Current price as float
-                "currency": "GBP",  // Always GBP for UK retailers
-                "original": 15.99,  // Original price if on sale (optional)
-                "discount_percentage": 33.3  // Calculated discount % (optional)
+                "amount": 10.99,
+                "currency": "GBP"
             }},
             "image_url": "Primary product image URL (string, required)",
-            "category": "{category}",  // Use the provided category
-            "vendor": "{vendor}",      // Use the provided vendor
+            "category": "{category}",
+            "vendor": "{vendor}",
             "weight": "Product weight if available (string, optional)",
             "scraped_at": "ISO timestamp (auto-generated)"
         }}
@@ -179,9 +177,9 @@ class ExtractionAgent:
               "extraction_batch": [
                 {{
                   "name": "Product Name",
-                  "description": "Product Description", 
-                  "price": {{"current": 10.99, "currency": "GBP"}},
-                  "image_url": "https://...",
+                  "description": "Product Description",
+                  "price": {{"amount": 10.99, "currency": "GBP"}},
+                  "image_url": "https://example.com/image.jpg",
                   "category": "{category}",
                   "vendor": "{vendor}",
                   "weight": "optional weight",
@@ -190,7 +188,7 @@ class ExtractionAgent:
               ],
               "extraction_metadata": {{
                 "page_number": {page_number},
-                "products_found": <number_of_products>,
+                "products_found": 5,
                 "extraction_method": "category_listing",
                 "vendor": "{vendor}",
                 "category": "{category}",
@@ -201,8 +199,9 @@ class ExtractionAgent:
             
             EXTRACTION PROCESS (NO NAVIGATION NEEDED):
             1. The Navigation Agent has already prepared the page - DO NOT navigate again
-            2. Extract data using this EXACT instruction: "Extract all product data including name, price, description, image URL, and weight from all products on the page. Return as a structured list where each product has: name (string), price (number), description (string), image_url (string), weight (string), category (string '{category}'), vendor (string '{vendor}')"
-            3. Use command_type="extract" to get structured data
+            2. Use command_type="extract" with this EXACT instruction: "Extract all product data from the page. For each product, get: name (string), description (string - use product name if no description), price object with amount as number and currency as 'GBP', image_url (string), weight (string if available), category '{category}', vendor '{vendor}'. Return valid JSON array with no comments."
+            3. If extraction returns empty results, try command_type="observe" to check page content first
+            4. CRITICAL: Do NOT repeat the same extraction command - if it fails once, try a different approach or report the issue
             4. Parse the JSON response and convert to StandardizedProduct objects
             5. For missing descriptions, use the product name as description
             6. CRITICAL: Use ONLY real product data from the page, NEVER generate fake data
@@ -217,6 +216,9 @@ class ExtractionAgent:
             - NEVER generate fake data like "Banana" with "https://example.com" URLs
             - ONLY extract real product data from the prepared page
             - DO NOT navigate - the Navigation Agent has already prepared the page
+            - Return valid JSON array without comments or additional text
+            - Extract ALL products on the page, not just 1-2 products
+            - Use product name as description if no description available
             - Return only products that meet StandardizedProduct schema requirements
             - Skip any products missing required fields rather than including incomplete data
             """

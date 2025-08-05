@@ -91,18 +91,20 @@ class StandardizedProduct(BaseModel):
     def validate_image_url(cls, v: str) -> str:
         """Validate image URL format."""
         if not v or not v.strip():
-            raise ValueError("Image URL cannot be empty")
-        
+            # Return placeholder URL for missing images
+            return "https://via.placeholder.com/300x300?text=No+Image"
+
         v = v.strip()
-        
+
         # Check if it's a valid URL format
         if not (v.startswith('http://') or v.startswith('https://') or v.startswith('//')):
-            raise ValueError("Image URL must be a valid HTTP/HTTPS URL")
-        
+            # If it's not a URL (like a product name), return placeholder
+            return "https://via.placeholder.com/300x300?text=No+Image"
+
         # Convert protocol-relative URLs to HTTPS
         if v.startswith('//'):
             v = 'https:' + v
-            
+
         return v
     
     @field_validator('category')

@@ -102,9 +102,15 @@ class NavigationAgent:
         5. Verify the page is ready for extraction by counting visible products
         6. Signal completion with page status
 
+        POPUP IDENTIFICATION:
+        - Look for modal dialogs or overlays that block the main content
+        - Identify elements with text like "Your privacy is important", "Accept Cookies", "Newsletter"
+        - Focus on elements that appear as overlays or modal windows
+        - IGNORE header navigation elements, footer links, and account buttons
+
         POPUP HANDLING PRIORITY:
         {general_popup_instructions}
-        
+
         VENDOR-SPECIFIC INSTRUCTIONS:
         {popup_instructions}
 
@@ -128,8 +134,17 @@ class NavigationAgent:
         - Navigate back to the original category URL immediately
         - Re-handle any popups that appear after returning
         - Verify you're back on the correct product listing page
-        - AVOID clicking "Register", "Sign In", or "Login" buttons
-        - Only dismiss actual popups, not navigation elements
+
+        CRITICAL ELEMENTS TO AVOID (NEVER CLICK THESE):
+        - "Register", "Sign In", "Login", "Create Account", "Sign Up" buttons
+        - "Help Centre", "Customer Service", "Contact Us" links
+        - Navigation menu items like "Groceries", "Offers", "Recipes"
+        - Footer links like "Privacy Policy", "Terms & Conditions"
+        - User account elements in header area
+        - ONLY click elements that are clearly popup dismiss buttons with text like:
+          * "Accept", "Accept All", "I Accept", "Accept Cookies"
+          * "Close", "Dismiss", "No Thanks", "Continue"
+          * "OK", "Got It", "Understood"
 
         INFINITE SCROLL HANDLING (ASDA SPECIFIC):
         - ASDA fruit pages initially show ~24 products but contain 60+ total

@@ -1,7 +1,7 @@
 ---
-type: "always_apply"
+type: "agent_requested"
+description: "Example description"
 ---
-
 # Ecommerce Scraper Debug Strategy Protocol
 
 ## MANDATORY DEBUG STRATEGY FOR ALL ECOMMERCE SCRAPER ISSUES
