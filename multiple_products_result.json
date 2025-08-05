@@ -1,8 +1,0 @@
-[
-  {
-    "success": false,
-    "product_url": "https://demo.vercel.store",
-    "error": "Error scraping product https://demo.vercel.store: Only one live display may be active at once",
-    "data": null
-  }
-]

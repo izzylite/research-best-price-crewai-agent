@@ -12,6 +12,8 @@ python-dotenv>=1.0.0
 rich>=13.0.0
 typer>=0.9.0
 nest_asyncio>=1.6.0
+requests>=2.31.0
+beautifulsoup4>=4.12.0
 
 # Optional: For local development and testing
 pytest>=7.0.0

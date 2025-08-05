@@ -45,6 +45,9 @@ class Settings(BaseSettings):
 
     # CrewAI Configuration
     enable_crew_memory: bool = Field(False, env="ENABLE_CREW_MEMORY")
+
+    # Scrappey Configuration
+    scrappey_api_key: str = Field("SCmmAiI9H2CnerD8ex4YOcvkmMzQgH0P3DyOWmuqk6Mp9YHmn8Fk2AKxF6nj", env="SCRAPPEY_API_KEY")
     
     @field_validator('browserbase_api_key', 'browserbase_project_id')
     @classmethod

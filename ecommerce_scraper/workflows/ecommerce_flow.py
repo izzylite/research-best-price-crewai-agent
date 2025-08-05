@@ -18,7 +18,7 @@ from ..agents.navigation_agent import NavigationAgent
 from ..agents.extraction_agent import ExtractionAgent
 from ..agents.validation_agent import ValidationAgent
 from ..schemas.standardized_product import StandardizedProduct
-from ..tools.stagehand_tool import EcommerceStagehandTool
+from ..tools.simplified_stagehand_tool import SimplifiedStagehandTool
 
 logger = logging.getLogger(__name__)
 
@@ -77,15 +77,18 @@ class EcommerceScrapingFlow(Flow[EcommerceScrapingState]):
         self._stagehand_tool = None
         self._shared_session_id = None
 
-    def _get_stagehand_tool(self, reuse_session: bool = True) -> EcommerceStagehandTool:
-        """Get or create StagehandTool instance with session sharing support."""
+    def _get_stagehand_tool(self, reuse_session: bool = True) -> SimplifiedStagehandTool:
+        """Get or create SimplifiedStagehandTool instance with session sharing support."""
         if self._stagehand_tool is None:
-            # Create tool with taller viewport (1920x1080) for better extraction coverage
-            self._stagehand_tool = EcommerceStagehandTool(
+            # Create simplified tool with taller viewport (1920x1080) for better extraction coverage
+            self._stagehand_tool = SimplifiedStagehandTool(
                 session_id=self._shared_session_id if reuse_session else None,
                 viewport_width=1920,
                 viewport_height=1080
             )
+
+            if self.verbose:
+                self.console.print("[dim]🔧 StagehandTool initialized for reliable extraction[/dim]")
 
             # If this is the first tool creation, capture the session ID for sharing
             if self._shared_session_id is None and reuse_session:
@@ -199,8 +202,8 @@ class EcommerceScrapingFlow(Flow[EcommerceScrapingState]):
                 if self._shared_session_id:
                     self.console.print(f"[dim]🔗 Using shared session: {self._shared_session_id}[/dim]")
 
-            # Create a new Extraction Agent with a tool that reuses the Navigation session
-            extraction_stagehand_tool = EcommerceStagehandTool(
+            # Create a new Extraction Agent with a simplified tool that reuses the Navigation session
+            extraction_stagehand_tool = SimplifiedStagehandTool(
                 session_id=self._shared_session_id,
                 viewport_width=1920,
                 viewport_height=1080
