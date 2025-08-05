@@ -103,120 +103,47 @@ class ExtractionAgent:
             """
 
         task_description = f"""
-        Extract ALL product data from {vendor} {category} page using StandardizedProduct schema.
+        Extract all products from the {vendor} {category} page.
 
-        CRITICAL: The page has already been prepared by the Navigation Agent. DO NOT navigate again.
+        The page is already prepared - just extract the product data.
 
-        Vendor: {vendor}
-        Category: {category}
-        Page Number: {page_number}
-        Session ID: {session_id}
+        Use simplified_stagehand_tool with:
+        - operation: "extract"
+        - instruction: "Extract all products from this page. For each product get the name, description, price, image URL, and weight. Return as JSON array with no comments."
 
         {feedback_instructions}
 
-        CRITICAL: Extract data in this EXACT StandardizedProduct format:
-        {{
-            "name": "Product title/name (string, required, min 1 char)",
-            "description": "Product description (string, required, min 1 char)",
-            "price": {{
-                "amount": 10.99,
-                "currency": "GBP"
-            }},
-            "image_url": "Primary product image URL (string, required)",
-            "category": "{category}",
-            "vendor": "{vendor}",
-            "weight": "Product weight if available (string, optional)",
-            "scraped_at": "ISO timestamp (auto-generated)"
-        }}
-
-        TOOL USAGE INSTRUCTIONS:
-        Use the simplified_stagehand_tool with these specific parameters:
-        - operation: "extract"
-        - instruction: "Extract all product data from the page. For each product, get: name (string), description (string), price (string), image_url (string), weight (string if available). Return valid JSON array."
-
-        EXTRACTION REQUIREMENTS (SIMPLIFIED API):
-        1. **ASSUME the page is already prepared and ready for extraction**
-        2. **DO NOT navigate or handle popups - focus purely on data extraction**
-        3. **Use simplified_stagehand_tool with operation="extract" for direct API extraction**
-        4. **Use natural language instruction for product data extraction**
-        5. **Extract ALL products on the page in a single extraction command**
-        6. **Return properly structured StandardizedProduct objects**
-        7. **IMPORTANT: Do NOT scroll - the page is already fully prepared by Navigation Agent**
-        8. Use detailed, specific instructions following official patterns
-        9. Ensure all required fields are populated (name, description, price, image_url)
-        10. Handle missing data gracefully (skip products with missing required fields)
-        11. Extract accurate pricing information in GBP format
-        12. Get the highest quality product image URL available
-        13. Clean and normalize product names and descriptions
-        14. Extract weight information for grocery items when available
-
-        EXTRACTION STRATEGY (SIMPLIFIED API FOLLOWING OFFICIAL PATTERNS):
-        - Use simplified_stagehand_tool with operation="extract" and detailed instruction parameter
-        - Extract all products in a single command with clear, specific instruction
-        - Follow official Browserbase MCP patterns for direct API usage
-        - Navigation Agent has already handled scrolling and made all products visible
-        - Return structured JSON data that matches StandardizedProduct schema
-        - No vendor-specific logic needed - universal instruction-based approach
-
-        VENDOR-SPECIFIC EXTRACTION PATTERNS:
-        - {vendor}: Use appropriate selectors for product cards, titles, prices, images
-        - Handle {vendor}'s specific pricing display formats
-        - Extract {vendor}'s specific product information layout
-        - Recognize {vendor}'s product card structure and data organization
-
-        QUALITY STANDARDS:
-        - All required fields must be present and valid
-        - Prices must be numeric values in GBP
-        - Image URLs must be valid and accessible
-        - Product names and descriptions must be meaningful and clean
-        - No placeholder or loading text should be extracted
-
-        CRITICAL: Only extract real data from the prepared page. Never generate fake data.
+        Extract all products from the page. Return valid JSON array only.
         """
 
         return Task(
             description=task_description,
             agent=self.agent,
             expected_output=f"""
-            A JSON object containing extracted product batch:
-            {{
-              "extraction_batch": [
-                {{
-                  "name": "Product Name",
-                  "description": "Product Description",
-                  "price": {{"amount": 10.99, "currency": "GBP"}},
-                  "image_url": "https://example.com/image.jpg",
-                  "category": "{category}",
-                  "vendor": "{vendor}",
-                  "weight": "optional weight",
-                  "scraped_at": "2025-01-04T12:34:56Z"
-                }}
-              ],
-              "extraction_metadata": {{
-                "page_number": {page_number},
-                "products_found": 5,
-                "extraction_method": "category_listing",
-                "vendor": "{vendor}",
+            Valid JSON array of products extracted from the page.
+
+            Example format:
+            [
+              {{
+                "name": "Product Name",
+                "description": "Product Description",
+                "price": {{"amount": 10.99, "currency": "GBP"}},
+                "image_url": "https://example.com/image.jpg",
                 "category": "{category}",
-                "session_id": "{session_id}",
-                "feedback_applied": {bool(feedback)}
+                "vendor": "{vendor}",
+                "weight": "optional weight",
+                "scraped_at": "2025-01-04T12:34:56Z"
               }}
-            }}
-            
-            CRITICAL: You MUST use the tool name "simplified_stagehand_tool" with the operation parameter.
+            ]
 
-            EXACT TOOL CALLING FORMAT:
+            TOOL USAGE:
             Tool: simplified_stagehand_tool
-            Action Input: {{"operation": "extract", "instruction": "Extract all product data from the page. For each product, get: name (string), description (string), price (string), image_url (string), weight (string if available), category '{category}', vendor '{vendor}'. Return valid JSON array with no comments."}}
+            Action Input: {{"operation": "extract", "instruction": "Extract all products from this page. For each product get the name, description, price, image URL, and weight. Return as JSON array with no comments."}}
 
-            EXTRACTION PROCESS (SIMPLIFIED API - NO NAVIGATION NEEDED):
-            1. The Navigation Agent has already prepared the page - DO NOT navigate again
-            2. Call simplified_stagehand_tool with {{"operation": "extract", "instruction": "Extract all product data from the page. For each product, get: name (string), description (string - use product name if no description), price (string), image_url (string), weight (string if available), category '{category}', vendor '{vendor}'. Return valid JSON array with no comments."}}
-            3. If extraction returns empty results, call simplified_stagehand_tool with {{"operation": "observe", "instruction": "Check page content for products"}} first
-            4. CRITICAL: Do NOT repeat the same extraction command - if it fails once, try a different approach or report the issue
-            5. Parse the JSON response and convert to StandardizedProduct objects
-            6. For missing descriptions, use the product name as description
-            7. CRITICAL: Use ONLY real product data from the page, NEVER generate fake data
+            SIMPLE EXTRACTION PROCESS:
+            1. Call simplified_stagehand_tool with {{"operation": "extract", "instruction": "Extract all products from this page. For each product get the name, description, price, image URL, and weight. Return as JSON array with no comments."}}
+            2. Return the extracted data as valid JSON
+            3. Use only real data from the page
 
             REMEMBER: Always use "simplified_stagehand_tool" as the tool name, never use "extract", "observe" as tool names.
 
@@ -235,6 +162,8 @@ class ExtractionAgent:
             - Use product name as description if no description available
             - Return only products that meet StandardizedProduct schema requirements
             - Skip any products missing required fields rather than including incomplete data
+
+            CRITICAL: Return valid JSON only - no comments, no explanations, no truncation.
             """
         )
 
@@ -384,7 +313,7 @@ class ExtractionAgent:
             Batch extraction result:
             {{
               "extraction_batch": [
-                // Array of up to {batch_size} StandardizedProduct objects
+
               ],
               "batch_metadata": {{
                 "batch_size": <actual_products_in_batch>,
@@ -463,7 +392,7 @@ class ExtractionAgent:
             High-quality extraction result:
             {{
               "extraction_batch": [
-                // Array of high-quality StandardizedProduct objects
+
               ],
               "quality_metadata": {{
                 "products_extracted": <number_of_quality_products>,

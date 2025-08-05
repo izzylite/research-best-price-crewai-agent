@@ -162,6 +162,13 @@ class ValidationAgent:
 
         CRITICAL: Focus on validation quality and storage reliability.
         Provide specific, actionable feedback for re-extraction when needed.
+
+        ABSOLUTELY FORBIDDEN - JSON COMMENTS:
+        - NEVER add // comments in JSON output
+        - NEVER add "// Additional products omitted for brevity"
+        - NEVER add "// Array of products" or similar comments
+        - JSON must be valid and parseable - no comments allowed
+        - Comments break JSON parsing and cause system failures
         """
 
         return Task(
@@ -175,7 +182,7 @@ class ValidationAgent:
               "products_failed": <number_of_invalid_products>,
               "feedback_required": <true/false>,
               "feedback_data": {{
-                // Feedback object if re-extraction needed
+
               }},
               "storage_info": {{
                 "json_file_path": "./results/scraping_sessions/{vendor}_{category}_{session_id}.json",
@@ -249,16 +256,16 @@ class ValidationAgent:
               "validation_result": "failed",
               "feedback": {{
                 "issues": [
-                  // Specific list of validation issues found
+
                 ],
                 "suggestions": [
-                  // Actionable improvement suggestions
+
                 ],
                 "alternative_strategies": [
-                  // Alternative extraction approaches to try
+
                 ],
                 "quality_requirements": {{
-                  // Specific quality standards to meet
+
                 }}
               }},
               "retry_count": {retry_count},
@@ -310,7 +317,7 @@ class ValidationAgent:
             }}
           }},
           "products": [
-            // Array of StandardizedProduct objects
+
           ],
           "session_statistics": {{
             "total_products_found": <count>,
@@ -432,7 +439,7 @@ class ValidationAgent:
                 "no_matches": <count>
               }},
               "deduplicated_products": [
-                // Array of unique StandardizedProduct objects
+
               ]
             }}
 

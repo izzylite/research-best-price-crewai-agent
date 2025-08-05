@@ -90,17 +90,20 @@ class EcommerceScrapingFlow(Flow[EcommerceScrapingState]):
             if self.verbose:
                 self.console.print("[dim]🔧 StagehandTool initialized for reliable extraction[/dim]")
 
-            # If this is the first tool creation, capture the session ID for sharing
-            if self._shared_session_id is None and reuse_session:
-                # Initialize the tool to get session ID
-                try:
-                    # Force initialization to get session ID
-                    self._stagehand_tool._get_stagehand()
-                    self._shared_session_id = self._stagehand_tool.get_session_id()
-                    if self._shared_session_id and self.verbose:
-                        self.console.print(f"[dim]🔗 Session created for sharing: {self._shared_session_id}[/dim]")
-                except Exception as e:
-                    logger.warning(f"Failed to initialize session for sharing: {e}")
+        # CRITICAL FIX: Always update session sharing after tool operations
+        if reuse_session and self._stagehand_tool:
+            # Get current session ID from the tool
+            current_session_id = self._stagehand_tool.get_session_id()
+            if current_session_id and current_session_id != self._shared_session_id:
+                self._shared_session_id = current_session_id
+                if self.verbose:
+                    self.console.print(f"[dim]🔗 Session updated for sharing: {self._shared_session_id}[/dim]")
+
+            # If tool doesn't have session yet, update it with shared session
+            elif self._shared_session_id and not current_session_id:
+                self._stagehand_tool.session_id = self._shared_session_id
+                if self.verbose:
+                    self.console.print(f"[dim]🔗 Session applied to tool: {self._shared_session_id}[/dim]")
 
         return self._stagehand_tool
     
@@ -175,14 +178,23 @@ class EcommerceScrapingFlow(Flow[EcommerceScrapingState]):
             )
             
             result = navigation_crew.kickoff()
-            
+
             if self.verbose:
                 self.console.print("[green]✅ Navigation completed[/green]")
-            
+
+            # CRITICAL FIX: Capture session ID after navigation for sharing
+            stagehand_tool = self._get_stagehand_tool()
+            current_session_id = stagehand_tool.get_session_id()
+            if current_session_id:
+                self._shared_session_id = current_session_id
+                if self.verbose:
+                    self.console.print(f"[dim]🔗 Session captured for extraction: {current_session_id}[/dim]")
+
             return {
                 "action": "extract",
                 "navigation_result": result,
-                "page": self.state.current_page
+                "page": self.state.current_page,
+                "session_id": current_session_id  # Pass session ID to extraction
             }
             
         except Exception as e:
@@ -202,9 +214,17 @@ class EcommerceScrapingFlow(Flow[EcommerceScrapingState]):
                 if self._shared_session_id:
                     self.console.print(f"[dim]🔗 Using shared session: {self._shared_session_id}[/dim]")
 
+            # CRITICAL FIX: Use session ID from navigation result if available
+            session_id_to_use = _nav_result.get("session_id") or self._shared_session_id
+
+            if self.verbose and session_id_to_use:
+                self.console.print(f"[dim]🔗 Extraction using session: {session_id_to_use}[/dim]")
+            elif self.verbose:
+                self.console.print("[yellow]⚠️ No session ID available - extraction may create new session[/yellow]")
+
             # Create a new Extraction Agent with a simplified tool that reuses the Navigation session
             extraction_stagehand_tool = SimplifiedStagehandTool(
-                session_id=self._shared_session_id,
+                session_id=session_id_to_use,
                 viewport_width=1920,
                 viewport_height=1080
             )

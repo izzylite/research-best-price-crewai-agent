@@ -1,5 +1,6 @@
 import logging
 import json
+import os
 from datetime import datetime
 
 class JSONFormatter(logging.Formatter):
@@ -17,13 +18,13 @@ class JSONFormatter(logging.Formatter):
         }
         return json.dumps(log_record)
 
-def setup_logger(name, log_file='app.log.json'):
+def setup_logger(name, log_dir='logs'):
     """
     Sets up a logger that writes logs in JSON format to a specified file.
 
     Args:
         name (str): The name of the logger.
-        log_file (str): The file to write logs to.
+        log_dir (str): The directory to write logs to.
 
     Returns:
         logging.Logger: A configured logger instance.
@@ -35,8 +36,16 @@ def setup_logger(name, log_file='app.log.json'):
     if logger.hasHandlers():
         logger.handlers.clear()
 
+    # Create the log directory if it doesn't exist.
+    if not os.path.exists(log_dir):
+        os.makedirs(log_dir)
+
+    # Create a unique log file name with a timestamp.
+    log_file = datetime.now().strftime('%Y-%m-%d_%H-%M-%S') + '.log.json'
+    log_path = os.path.join(log_dir, log_file)
+
     # Create a file handler to write to the log file.
-    handler = logging.FileHandler(log_file, mode='a')
+    handler = logging.FileHandler(log_path, mode='a')
     handler.setFormatter(JSONFormatter())
     logger.addHandler(handler)
     
