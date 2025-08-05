@@ -80,9 +80,6 @@ class SimplifiedStagehandTool(BaseTool):
         We need to extract the operation and other parameters from kwargs.
         """
         try:
-            # DEBUG: Log all received parameters
-            logger.info(f"[DEBUG] _run called with kwargs={kwargs}")
-
             # Extract operation from kwargs
             operation = kwargs.get("operation", "")
             if not operation:
@@ -106,15 +103,10 @@ class SimplifiedStagehandTool(BaseTool):
             Operation result as string
         """
         try:
-            # DEBUG: Log all received parameters
-            logger.info(f"[DEBUG] _execute_operation called with kwargs={kwargs}")
-
             # Extract operation from kwargs
             operation = kwargs.get("operation", "")
             if not operation:
                 raise ValueError("operation parameter is required")
-
-            logger.info(f"[DEBUG] operation='{operation}'")
 
             # Handle event loop properly for CrewAI environment
             import nest_asyncio
@@ -134,7 +126,6 @@ class SimplifiedStagehandTool(BaseTool):
             # Dispatch to appropriate method
             if operation == "extract":
                 instruction = kwargs.get("instruction", "")
-                logger.info(f"[DEBUG] extract operation - instruction='{instruction}'")
                 if not instruction:
                     raise ValueError("extract operation requires 'instruction' parameter")
                 return run_async(self.extract(instruction))
@@ -142,7 +133,6 @@ class SimplifiedStagehandTool(BaseTool):
             elif operation == "act":
                 action = kwargs.get("action", "")
                 variables = kwargs.get("variables")
-                logger.info(f"[DEBUG] act operation - action='{action}', variables={variables}")
                 if not action:
                     raise ValueError("act operation requires 'action' parameter")
                 return run_async(self.act(action, variables))
@@ -150,15 +140,17 @@ class SimplifiedStagehandTool(BaseTool):
             elif operation == "observe":
                 instruction = kwargs.get("instruction", "")
                 return_action = kwargs.get("return_action", False)
-                logger.info(f"[DEBUG] observe operation - instruction='{instruction}', return_action={return_action}")
+                logger.info(f"[DEBUG] observe operation - kwargs={kwargs}")
+                logger.info(f"[DEBUG] observe operation - instruction='{instruction}' (type: {type(instruction)}, len: {len(instruction) if instruction else 'N/A'})")
+                logger.info(f"[DEBUG] observe operation - return_action={return_action}")
                 if not instruction:
                     logger.error(f"[DEBUG] observe operation failed - instruction is empty or None")
+                    logger.error(f"[DEBUG] observe operation failed - kwargs keys: {list(kwargs.keys())}")
                     raise ValueError("observe operation requires 'instruction' parameter")
                 return run_async(self.observe(instruction, return_action))
 
             elif operation == "navigate":
                 url = kwargs.get("url", "")
-                logger.info(f"[DEBUG] navigate operation - url='{url}'")
                 if not url:
                     raise ValueError("navigate operation requires 'url' parameter")
                 return run_async(self.navigate(url))
@@ -341,32 +333,40 @@ class SimplifiedStagehandTool(BaseTool):
     async def observe(self, instruction: str, return_action: bool = False) -> str:
         """
         Observe and identify elements on the page.
-        
+
         Following official pattern: await stagehand.page.observe({instruction, returnAction})
-        
+
         Args:
             instruction: Detailed instruction for what to observe
             return_action: Whether to return suggested actions
-            
+
         Returns:
             JSON string with observation data
         """
         try:
+            logger.info(f"[OBSERVE] Method called with instruction='{instruction}' (type: {type(instruction)}, len: {len(instruction) if instruction else 'N/A'})")
+            logger.info(f"[OBSERVE] Method called with return_action={return_action}")
+
+            if not instruction:
+                error_msg = "No instruction provided for observe."
+                logger.error(f"[OBSERVE] {error_msg}")
+                raise ValueError(error_msg)
+
             stagehand = await self._get_stagehand()
-            
+
             logger.info(f"[OBSERVE] Observing with instruction: {instruction[:100]}...")
-            
+
             # Direct API call following official pattern
             observations = await stagehand.page.observe({
                 "instruction": instruction,
                 "returnAction": return_action
             })
-            
+
             result = json.dumps(observations, indent=2)
             logger.info(f"[OBSERVE] Successfully observed {len(observations) if isinstance(observations, list) else 1} elements")
-            
+
             return result
-            
+
         except Exception as error:
             error_msg = f"Failed to observe: {str(error)}"
             logger.error(f"[OBSERVE] {error_msg}")
