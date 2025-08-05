@@ -1,25 +1,26 @@
 """
-Simplified Stagehand Tool based on official Browserbase MCP patterns.
+Simplified Stagehand Tool using official Stagehand v0.5.0 API.
 
-This implementation follows the official patterns from:
-https://github.com/browserbase/mcp-server-browserbase/tree/main/src/tools
+This implementation uses the official Stagehand Python package v0.5.0:
+https://pypi.org/project/stagehand/
 
-Key improvements:
-1. Direct stagehand.page.extract() calls (no command_type abstraction)
-2. Simple instruction-based API
-3. Proper session management with context sharing
+Key features:
+1. Official Stagehand v0.5.0 API (fixes observe parameter bug)
+2. Simple instruction-based operations
+3. Proper session management
 4. Clean error handling
-5. Variable substitution support
+5. Direct API calls without abstractions
 """
 
 import json
-import logging
 import asyncio
 from typing import Dict, Any, Optional, Union
 from crewai.tools import BaseTool
 from pydantic import BaseModel, Field
 
-logger = logging.getLogger(__name__)
+from .custom_logger import setup_logger
+
+logger = setup_logger(__name__)
 
 class SimplifiedStagehandInput(BaseModel):
     """Input schema for SimplifiedStagehandTool."""
@@ -89,7 +90,7 @@ class SimplifiedStagehandTool(BaseTool):
             return self._execute_operation(**kwargs)
 
         except Exception as e:
-            logger.error(f"[ERROR] Tool execution failed: {e}")
+            logger.error(f"Tool execution failed: {e}")
             return f"Error: {str(e)}"
 
     def _execute_operation(self, **kwargs) -> str:
@@ -140,12 +141,12 @@ class SimplifiedStagehandTool(BaseTool):
             elif operation == "observe":
                 instruction = kwargs.get("instruction", "")
                 return_action = kwargs.get("return_action", False)
-                logger.info(f"[DEBUG] observe operation - kwargs={kwargs}")
-                logger.info(f"[DEBUG] observe operation - instruction='{instruction}' (type: {type(instruction)}, len: {len(instruction) if instruction else 'N/A'})")
-                logger.info(f"[DEBUG] observe operation - return_action={return_action}")
+                logger.info(f"observe operation - kwargs={kwargs}")
+                logger.info(f"observe operation - instruction='{instruction}' (type: {type(instruction)}, len: {len(instruction) if instruction else 'N/A'})")
+                logger.info(f"observe operation - return_action={return_action}")
                 if not instruction:
-                    logger.error(f"[DEBUG] observe operation failed - instruction is empty or None")
-                    logger.error(f"[DEBUG] observe operation failed - kwargs keys: {list(kwargs.keys())}")
+                    logger.error(f"observe operation failed - instruction is empty or None")
+                    logger.error(f"observe operation failed - kwargs keys: {list(kwargs.keys())}")
                     raise ValueError("observe operation requires 'instruction' parameter")
                 return run_async(self.observe(instruction, return_action))
 
@@ -159,7 +160,7 @@ class SimplifiedStagehandTool(BaseTool):
                 raise ValueError(f"Unknown operation: {operation}. Supported: extract, act, observe, navigate")
 
         except Exception as e:
-            logger.error(f"[ERROR] Operation execution failed: {e}")
+            logger.error(f"Operation execution failed: {e}")
             return f"Error: {str(e)}"
 
     # Tool configuration
@@ -170,75 +171,64 @@ class SimplifiedStagehandTool(BaseTool):
     # Internal state
     _stagehand: Optional[Any] = None
     _session_initialized: bool = False
+    session_id: Optional[str] = None
     
     def __init__(self, **kwargs):
         """Initialize the simplified Stagehand tool."""
         super().__init__(**kwargs)
-        logger.info(f"[SIMPLIFIED] SimplifiedStagehandTool initialized")
-        logger.info(f"[VIEWPORT] Viewport configured: {self.viewport_width}x{self.viewport_height}")
+        import uuid
+        self._instance_id = str(uuid.uuid4())[:8]
+        logger.info(f"SimplifiedStagehandTool initialized - Instance ID: {self._instance_id}")
+        logger.info(f"Viewport configured: {self.viewport_width}x{self.viewport_height}")
+        print(f"SimplifiedStagehandTool created - Instance ID: {self._instance_id}")  # Force console output
     
     async def _get_stagehand(self):
-        """Get or create Stagehand instance following official patterns."""
+        """Get or create Stagehand instance using official v0.5.0 API."""
         if self._stagehand is None or not self._session_initialized:
             try:
-                # Import here to avoid circular imports
+                # Import official Stagehand v0.5.0
                 from stagehand import Stagehand
-                
-                logger.info("[INIT] Initializing Stagehand session...")
-                
-                # Get Browserbase credentials from environment (same as current tool)
+
+                logger.info("Initializing Stagehand v0.5.0 session...")
+
+                # Get credentials from environment
                 import os
 
                 api_key = os.getenv('BROWSERBASE_API_KEY')
                 project_id = os.getenv('BROWSERBASE_PROJECT_ID')
+                model_api_key = os.getenv('OPENAI_API_KEY')
 
                 if not api_key or not project_id:
                     raise Exception("Browserbase API key and project ID are required. Set BROWSERBASE_API_KEY and BROWSERBASE_PROJECT_ID environment variables.")
 
-                # Create Stagehand instance using same pattern as working tool
-                stagehand_config = {
-                    "api_key": api_key,
-                    "project_id": project_id,
-                    "model_api_key": os.getenv('OPENAI_API_KEY'),  # Required for extraction
-                    "dom_settle_timeout_ms": 3000,
-                    "headless": True,
-                    "verbose": False,
-                    "self_heal": True,
-                    "wait_for_captcha_solves": True,
-                    "browserbase_session_create_params": {
-                        "project_id": project_id,
-                        "browser_settings": {
-                            "viewport": {
-                                "width": self.viewport_width,
-                                "height": self.viewport_height,
-                            },
-                            "block_ads": True,
-                        },
-                    }
-                }
+                if not model_api_key:
+                    raise Exception("OpenAI API key is required for Stagehand operations. Set OPENAI_API_KEY environment variable.")
 
-                # Add session ID for session reuse if provided
-                if self.session_id:
-                    stagehand_config["browserbase_session_id"] = self.session_id
-                    logger.info(f"[SESSION] Reusing Browserbase session: {self.session_id}")
+                # Create Stagehand instance using official v0.5.0 API pattern
+                # This matches the working pattern from our test
+                self._stagehand = Stagehand(
+                    env="BROWSERBASE",
+                    api_key=api_key,
+                    project_id=project_id,
+                    model_name="gpt-4o",
+                    model_api_key=model_api_key,
+                )
 
-                self._stagehand = Stagehand(**stagehand_config)
-                
                 # Initialize following official pattern
                 await self._stagehand.init()
                 self._session_initialized = True
-                
-                logger.info("[SUCCESS] Stagehand session initialized successfully")
-                
-                # Store session ID for reuse
-                if hasattr(self._stagehand, 'browserbaseSessionID'):
-                    self.session_id = self._stagehand.browserbaseSessionID
-                    logger.info(f"[SESSION] Session ID: {self.session_id}")
-                
+
+                logger.info("Stagehand v0.5.0 session initialized successfully")
+
+                # Store session ID for reuse (check if available)
+                if hasattr(self._stagehand, 'session_id'):
+                    self.session_id = self._stagehand.session_id
+                    logger.info(f"Session ID: {self.session_id}")
+
             except Exception as e:
-                logger.error(f"[ERROR] Failed to initialize Stagehand: {e}")
-                raise Exception(f"Failed to initialize Stagehand: {e}")
-        
+                logger.error(f"Failed to initialize Stagehand v0.5.0: {e}")
+                raise Exception(f"Failed to initialize Stagehand v0.5.0: {e}")
+
         return self._stagehand
     
     async def extract(self, instruction: str) -> str:
@@ -256,7 +246,7 @@ class SimplifiedStagehandTool(BaseTool):
         try:
             stagehand = await self._get_stagehand()
             
-            logger.info(f"[EXTRACT] Extracting with instruction: {instruction[:100]}...")
+            logger.info(f"Extracting with instruction: {instruction[:100]}...")
             
             # Direct API call following official pattern
             extraction = await stagehand.page.extract(instruction)
@@ -287,13 +277,13 @@ class SimplifiedStagehandTool(BaseTool):
 
             # Return formatted JSON following official pattern
             result = json.dumps(extraction_dict, indent=2, default=str)
-            logger.info(f"[EXTRACT] Successfully extracted {len(result)} characters")
+            logger.info(f"Successfully extracted {len(result)} characters")
 
             return result
             
         except Exception as error:
             error_msg = f"Failed to extract content: {str(error)}"
-            logger.error(f"[EXTRACT] {error_msg}")
+            logger.error(f"{error_msg}")
             raise Exception(error_msg)
     
     async def act(self, action: str, variables: Optional[Dict[str, Any]] = None) -> str:
@@ -312,7 +302,7 @@ class SimplifiedStagehandTool(BaseTool):
         try:
             stagehand = await self._get_stagehand()
             
-            logger.info(f"[ACT] Performing action: {action}")
+            logger.info(f"Performing action: {action}")
             
             # Direct API call following official pattern
             await stagehand.page.act({
@@ -321,55 +311,45 @@ class SimplifiedStagehandTool(BaseTool):
             })
             
             result = f"Action performed: {action}"
-            logger.info(f"[ACT] {result}")
+            logger.info(f"{result}")
             
             return result
             
         except Exception as error:
             error_msg = f"Failed to perform action: {str(error)}"
-            logger.error(f"[ACT] {error_msg}")
+            logger.error(f"{error_msg}")
             raise Exception(error_msg)
     
     async def observe(self, instruction: str, return_action: bool = False) -> str:
         """
-        Observe and identify elements on the page.
-
-        Following official pattern: await stagehand.page.observe({instruction, returnAction})
+        Observe and identify elements on the page using official v0.5.0 API.
 
         Args:
             instruction: Detailed instruction for what to observe
-            return_action: Whether to return suggested actions
+            return_action: Whether to return suggested actions (not used in v0.5.0)
 
         Returns:
             JSON string with observation data
         """
         try:
-            logger.info(f"[OBSERVE] Method called with instruction='{instruction}' (type: {type(instruction)}, len: {len(instruction) if instruction else 'N/A'})")
-            logger.info(f"[OBSERVE] Method called with return_action={return_action}")
-
-            if not instruction:
-                error_msg = "No instruction provided for observe."
-                logger.error(f"[OBSERVE] {error_msg}")
-                raise ValueError(error_msg)
+            logger.info(f"Starting observation with instruction: {instruction}")
+            print(f"OBSERVE (official v0.5.0) - instruction: '{instruction}'")
 
             stagehand = await self._get_stagehand()
 
-            logger.info(f"[OBSERVE] Observing with instruction: {instruction[:100]}...")
+            # Official v0.5.0 API pattern: Simple string parameter
+            # Based on our successful test: await page.observe(instruction)
+            observations = await stagehand.page.observe(instruction)
 
-            # Direct API call following official pattern
-            observations = await stagehand.page.observe({
-                "instruction": instruction,
-                "returnAction": return_action
-            })
-
-            result = json.dumps(observations, indent=2)
-            logger.info(f"[OBSERVE] Successfully observed {len(observations) if isinstance(observations, list) else 1} elements")
+            # Format result as JSON string
+            result = f"Observations: {json.dumps(observations, default=str)}"
+            logger.info(f"Observation completed successfully")
 
             return result
 
         except Exception as error:
             error_msg = f"Failed to observe: {str(error)}"
-            logger.error(f"[OBSERVE] {error_msg}")
+            logger.error(f"{error_msg}")
             raise Exception(error_msg)
     
     async def navigate(self, url: str) -> str:
@@ -387,7 +367,7 @@ class SimplifiedStagehandTool(BaseTool):
         try:
             stagehand = await self._get_stagehand()
             
-            logger.info(f"[NAVIGATE] Navigating to: {url}")
+            logger.info(f"Navigating to: {url}")
             
             # Direct API call following official pattern (Python naming convention)
             await stagehand.page.goto(url, wait_until="domcontentloaded")
@@ -396,13 +376,13 @@ class SimplifiedStagehandTool(BaseTool):
             session_id = getattr(stagehand, 'browserbaseSessionID', 'unknown')
             result = f"Navigated to: {url}\nSession: {session_id}"
             
-            logger.info(f"[NAVIGATE] Successfully navigated to {url}")
+            logger.info(f"Successfully navigated to {url}")
             
             return result
             
         except Exception as error:
             error_msg = f"Failed to navigate: {str(error)}"
-            logger.error(f"[NAVIGATE] {error_msg}")
+            logger.error(f"{error_msg}")
             raise Exception(error_msg)
     
 
@@ -415,11 +395,11 @@ class SimplifiedStagehandTool(BaseTool):
         """Close the Stagehand session following official cleanup pattern."""
         if self._stagehand and self._session_initialized:
             try:
-                logger.info("[CLEANUP] Closing Stagehand session...")
+                logger.info("Closing Stagehand session...")
                 await self._stagehand.close()
-                logger.info("[CLEANUP] Stagehand session closed successfully")
+                logger.info("Stagehand session closed successfully")
             except Exception as e:
-                logger.warning(f"[CLEANUP] Error closing Stagehand session: {e}")
+                logger.warning(f"Error closing Stagehand session: {e}")
             finally:
                 self._stagehand = None
                 self._session_initialized = False
