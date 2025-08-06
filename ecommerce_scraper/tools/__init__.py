@@ -1,6 +1,6 @@
 """Tools module for ecommerce scraper."""
 
-from .stagehand_tool import EcommerceStagehandTool
+from .simplified_stagehand_tool import SimplifiedStagehandTool
 from .data_tools import ProductDataValidator, PriceExtractor, ImageExtractor
 
-__all__ = ["EcommerceStagehandTool", "ProductDataValidator", "PriceExtractor", "ImageExtractor"]
+__all__ = ["SimplifiedStagehandTool", "ProductDataValidator", "PriceExtractor", "ImageExtractor"]

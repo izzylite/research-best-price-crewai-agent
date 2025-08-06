@@ -301,12 +301,11 @@ class EcommerceScrapingFlow(Flow[EcommerceScrapingState]):
             return []
 
     @listen(extract_products)
-    @router
-    def validate_and_route(self, extraction_result: Dict[str, Any]) -> str:
-        """ValidationAgent: Validate products and determine next action."""
+    def validate_products(self, extraction_result: Dict[str, Any]) -> Dict[str, Any]:
+        """ValidationAgent: Validate extracted products."""
         try:
             if extraction_result.get("action") == "error":
-                return "handle_error"
+                return {"action": "error", "error": extraction_result.get("error")}
 
             if self.verbose:
                 self.console.print(f"[magenta]🔍 Validation Phase - Page {self.state.current_page}[/magenta]")
@@ -328,8 +327,38 @@ class EcommerceScrapingFlow(Flow[EcommerceScrapingState]):
 
             result = validation_crew.kickoff()
 
+            # Debug: Print validation result for troubleshooting
+            if self.verbose:
+                self.console.print(f"[dim]🔍 Validation result type: {type(result)}[/dim]")
+                if hasattr(result, 'raw'):
+                    self.console.print(f"[dim]🔍 Validation raw: {result.raw[:200]}...[/dim]")
+
             # Parse validation result
             validation_passed = self._parse_validation_result(result)
+
+            if self.verbose:
+                self.console.print(f"[dim]🔍 Validation passed: {validation_passed}[/dim]")
+
+            return {
+                "action": "route_after_validation",
+                "validation_passed": validation_passed,
+                "validation_result": result,
+                "extracted_products": extraction_result.get("extracted_products", [])
+            }
+
+        except Exception as e:
+            logger.error(f"Validation failed: {str(e)}")
+            return {"action": "error", "error": str(e)}
+
+    @listen(validate_products)
+    @router
+    def route_after_validation(self, validation_result: Dict[str, Any]) -> str:
+        """Router: Determine next action after validation."""
+        try:
+            if validation_result.get("action") == "error":
+                return "handle_error"
+
+            validation_passed = validation_result.get("validation_passed", False)
 
             if validation_passed:
                 self.state.successful_extractions += 1
@@ -343,10 +372,16 @@ class EcommerceScrapingFlow(Flow[EcommerceScrapingState]):
                     # Check if there are more pages available
                     if self._has_more_pages():
                         self.state.current_page += 1
+                        if self.verbose:
+                            self.console.print(f"[cyan]🔀 Router: Validation passed, routing to 'next_page'[/cyan]")
                         return "next_page"
                     else:
+                        if self.verbose:
+                            self.console.print(f"[cyan]🔀 Router: Validation passed, no more pages, routing to 'complete'[/cyan]")
                         return "complete"
                 else:
+                    if self.verbose:
+                        self.console.print(f"[cyan]🔀 Router: Validation passed, max pages reached, routing to 'complete'[/cyan]")
                     return "complete"
             else:
                 # Validation failed - check if we should retry
@@ -354,11 +389,12 @@ class EcommerceScrapingFlow(Flow[EcommerceScrapingState]):
 
                 if self.state.extraction_attempts < self.state.max_extraction_attempts:
                     # Store feedback for re-extraction
-                    self.state.validation_feedback = self._get_validation_feedback(result)
+                    self.state.validation_feedback = self._get_validation_feedback(validation_result.get("validation_result"))
 
                     if self.verbose:
                         self.console.print(f"[yellow]🔄 Re-extraction needed (attempt {self.state.extraction_attempts})[/yellow]")
                         self.console.print(f"[yellow]Feedback: {self.state.validation_feedback}[/yellow]")
+                        self.console.print(f"[cyan]🔀 Router: Validation failed, routing to 're_extract'[/cyan]")
 
                     return "re_extract"
                 else:
@@ -374,8 +410,12 @@ class EcommerceScrapingFlow(Flow[EcommerceScrapingState]):
                         self.state.current_page < self.state.max_pages):
                         if self._has_more_pages():
                             self.state.current_page += 1
+                            if self.verbose:
+                                self.console.print(f"[cyan]🔀 Router: Max attempts reached, routing to 'next_page'[/cyan]")
                             return "next_page"
 
+                    if self.verbose:
+                        self.console.print(f"[cyan]🔀 Router: Max attempts reached, no more pages, routing to 'complete'[/cyan]")
                     return "complete"
 
         except Exception as e:
@@ -386,12 +426,33 @@ class EcommerceScrapingFlow(Flow[EcommerceScrapingState]):
     def _parse_validation_result(self, result: Any) -> bool:
         """Parse validation result to determine if validation passed."""
         try:
+            # Check for validation_passed field (legacy)
             if hasattr(result, 'validation_passed'):
                 return result.validation_passed
-            elif hasattr(result, 'raw') and result.raw:
-                # Try to parse from raw output
-                raw = result.raw.lower()
-                return 'valid' in raw or 'passed' in raw or 'success' in raw
+
+            # Check for validation_complete field (current ValidationAgent format)
+            if hasattr(result, 'validation_complete'):
+                return result.validation_complete
+
+            # Try to parse from raw JSON output
+            if hasattr(result, 'raw') and result.raw:
+                import json
+                try:
+                    # Try to parse as JSON first
+                    raw_data = json.loads(result.raw)
+                    if isinstance(raw_data, dict):
+                        # Check for validation_complete field
+                        if 'validation_complete' in raw_data:
+                            return raw_data['validation_complete']
+                        # Check for feedback_required field (inverse logic)
+                        if 'feedback_required' in raw_data:
+                            return not raw_data['feedback_required']
+                except json.JSONDecodeError:
+                    # Fallback to text parsing
+                    raw = result.raw.lower()
+                    return ('validation_complete": true' in raw or
+                            'valid' in raw or 'passed' in raw or 'success' in raw)
+
             return False
         except Exception as e:
             logger.warning(f"Failed to parse validation result: {e}")
@@ -502,18 +563,20 @@ class EcommerceScrapingFlow(Flow[EcommerceScrapingState]):
         if self.verbose:
             self.console.print(f"[yellow]🔄 Re-extracting with feedback[/yellow]")
 
-        return {
-            "action": "extract",
+        # Directly call extraction with feedback - this will trigger validate_products
+        return self.extract_products({
+            "action": "re_extract",
             "page": self.state.current_page,
             "feedback": self.state.validation_feedback
-        }
+        })
 
     @listen("complete")
     def finalize_results(self) -> Dict[str, Any]:
         """Finalize scraping results and prepare output."""
         try:
             if self.verbose:
-                self.console.print("[bold green]🎉 Scraping completed![/bold green]")
+                self.console.print("[bold green]� FINALIZE_RESULTS CALLED! 🎯[/bold green]")
+                self.console.print("[bold green]�🎉 Scraping completed![/bold green]")
                 self.console.print(f"[cyan]Total pages processed: {self.state.pages_processed}[/cyan]")
                 self.console.print(f"[cyan]Total products found: {self.state.total_products_found}[/cyan]")
                 self.console.print(f"[cyan]Successful extractions: {self.state.successful_extractions}[/cyan]")
@@ -521,7 +584,7 @@ class EcommerceScrapingFlow(Flow[EcommerceScrapingState]):
 
             # Convert products to StandardizedProduct objects
             standardized_products = []
-            for product_data in self.state.products:
+            for i, product_data in enumerate(self.state.products):
                 try:
                     if isinstance(product_data, dict):
                         product = StandardizedProduct(**product_data)
@@ -529,11 +592,20 @@ class EcommerceScrapingFlow(Flow[EcommerceScrapingState]):
                     elif isinstance(product_data, StandardizedProduct):
                         standardized_products.append(product_data)
                 except Exception as e:
-                    logger.warning(f"Failed to standardize product: {e}")
+                    logger.error(f"Failed to standardize product {i+1}: {e}")
+                    logger.error(f"Product data: {product_data}")
                     continue
 
             self.state.final_products = standardized_products
-            self.state.success = True
+
+            # Check if standardization was successful
+            if not standardized_products and self.state.products:
+                logger.error(f"Standardization failed: {len(self.state.products)} products extracted but 0 standardized")
+                self.state.success = False
+                self.state.error_message = f"Product standardization failed: {len(self.state.products)} products extracted but none could be standardized"
+                return self.handle_error()
+            else:
+                self.state.success = True
 
             # Create final result
             result = {

@@ -617,11 +617,14 @@ def execute_scraping_plan(plan: Dict[str, Any], scraping_urls: List[Dict[str, An
 
                         console.print(f"[green]✅ {vendor}/{category['category_name']}: {category_products} products[/green]")
 
-                        # Show agent breakdown
-                        if result.agent_results:
-                            for agent_result in result.agent_results:
-                                status = "✅" if agent_result['success'] else "❌"
-                                console.print(f"[dim]   {status} Agent {agent_result['agent_id']}: {agent_result['subcategory']} ({agent_result['products_found']} products)[/dim]")
+                        # Show extraction statistics from CrewAI Flow
+                        if hasattr(result, 'statistics') and result.statistics:
+                            stats = result.statistics
+                            if 'successful_extractions' in stats and 'failed_extractions' in stats:
+                                success_rate = stats.get('extraction_success_rate', 0)
+                                console.print(f"[dim]   📊 Extraction success rate: {success_rate:.1f}% ({stats['successful_extractions']} successful, {stats['failed_extractions']} failed)[/dim]")
+                            if 'total_pages_processed' in stats:
+                                console.print(f"[dim]   📄 Pages processed: {stats['total_pages_processed']}[/dim]")
                     else:
                         failed_categories += 1
                         console.print(f"[red]❌ {vendor}/{category['category_name']}: {result.error}[/red]")
