@@ -205,12 +205,16 @@ class PopupHandler:
 
 def handle_common_popups(stagehand_tool, vendor: str = None) -> List[str]:
     """
-    Handle common popups using the provided Stagehand tool.
-    
+    Handle common popups and prepare page for extraction.
+
+    This function:
+    1. Dismisses common popups (cookies, newsletter, age verification, etc.)
+    2. Verifies page accessibility
+
     Args:
         stagehand_tool: Instance of EcommerceStagehandTool
         vendor: Optional vendor name for specific handling
-        
+
     Returns:
         List of actions taken
     """
@@ -265,11 +269,11 @@ def handle_common_popups(stagehand_tool, vendor: str = None) -> List[str]:
             instruction=PopupHandler.get_verification_command(),
             command_type="observe"
         )
-        
+
         logger.info(f"Popup handling completed. Actions taken: {actions_taken}")
-        
+
     except Exception as e:
         logger.error(f"Error during popup handling: {str(e)}")
         actions_taken.append(f"Error: {str(e)}")
-    
+
     return actions_taken

@@ -80,11 +80,6 @@ class NavigationAgent:
         """Create a task for navigating to a category page and preparing it for extraction."""
         from crewai import Task
 
-        # Get vendor-specific configuration
-        site_config = get_site_config_by_vendor(vendor)
-        popup_instructions = PopupHandler.get_vendor_specific_instructions(vendor)
-        general_popup_instructions = PopupHandler.get_popup_handling_instructions()
-
         task_description = f"""
         Navigate to {category_url} and prepare the page for data extraction.
 

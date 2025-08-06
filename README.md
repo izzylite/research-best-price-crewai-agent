@@ -439,6 +439,18 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 **Built with ❤️ using Stagehand and CrewAI**
 
+https://www.asda.com/ // Can scrap
+https://www.waitrose.com/ // Can scrap
+https://www.mamasandpapas.com/ // Can scrap
+https://www.next.co.uk/ // Can scrap
+https://www.primark.com/en-gb // Can scrap
+https://www.thetoyshop.com/ // Can scrap
+
+https://www.tesco.com/groceries/en-GB // Blocked
+https://www.hamleys.com/ // Blocked
+https://www.selfridges.com/GB/en/ //Blocked
+
+
 
 
 

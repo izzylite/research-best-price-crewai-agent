@@ -263,58 +263,87 @@ class SimplifiedStagehandTool(BaseTool):
     
     async def extract(self, instruction: str) -> str:
         """
-        Extract structured data from the current page using natural language instruction.
-        
-        Following official pattern: await stagehand.page.extract(instruction)
-        
+        Extract structured data using schema-based extraction.
+
+        Following official Stagehand pattern with Pydantic schema.
+
         Args:
             instruction: Detailed instruction for what to extract
-            
+
         Returns:
             JSON string with extracted data
         """
         try:
             stagehand = await self._get_stagehand()
-            
-            self.logger.info(f"Extracting with instruction: {instruction[:100]}...")
-            
-            # Direct API call following official pattern
-            extraction = await stagehand.page.extract(instruction)
 
-            # Handle different extraction result types
+            self.logger.info(f"Schema-based extraction: {instruction[:100]}...")
+
+            # Create a simple, flexible schema following official documentation
+            from typing import List, Optional
+            from pydantic import BaseModel
+
+            class Product(BaseModel):
+                name: str
+                description: str
+                price: str
+                image_url: Optional[str] = None  # Optional field
+                weight: Optional[str] = None
+                category: str
+                vendor: str
+
+            class ProductList(BaseModel):
+                products: List[Product]
+
+            # Use schema-based extraction following official documentation
+            # Simplified instruction focusing on what actually works
+            detailed_instruction = f"""
+            {instruction}
+
+            Extract all products from this page. For each product, extract:
+            - name: Product name/title
+            - description: Product description if available
+            - price: Product price (e.g., "£1.97")
+            - weight: Product weight/size (e.g., "150g", "400g")
+            - category: Product category
+            - vendor: Vendor name
+            - image_url: Set to null (will be handled separately)
+
+            Return valid JSON with all required fields.
+            """
+
+            extraction = await stagehand.page.extract(
+                detailed_instruction,
+                schema=ProductList
+            )
+
+            # Handle the extraction result
             if hasattr(extraction, 'model_dump'):
-                # Pydantic model - convert to dict
-                extraction_dict = extraction.model_dump()
-            elif hasattr(extraction, '__dict__'):
-                # Object with attributes - convert to dict
-                extraction_dict = extraction.__dict__
+                # Pydantic model - get the products list
+                result_dict = extraction.model_dump()
+                products = result_dict.get('products', [])
+            elif hasattr(extraction, 'products'):
+                # Direct access to products
+                products = extraction.products
+                if hasattr(products[0], 'model_dump'):
+                    products = [p.model_dump() for p in products]
             else:
-                # Already a dict or primitive type
-                extraction_dict = extraction
+                # Fallback - assume it's already a list
+                products = extraction if isinstance(extraction, list) else []
 
-            # If the result has an "extraction" key, unwrap it
-            if isinstance(extraction_dict, dict) and "extraction" in extraction_dict:
-                # Try to parse the inner extraction as JSON
-                inner_extraction = extraction_dict["extraction"]
-                if isinstance(inner_extraction, str):
-                    try:
-                        extraction_dict = json.loads(inner_extraction)
-                    except json.JSONDecodeError:
-                        # If it's not valid JSON, keep the original structure
-                        pass
-                else:
-                    extraction_dict = inner_extraction
+            # Log extraction success
+            self.logger.info(f"Successfully extracted {len(products)} products")
 
-            # Return formatted JSON following official pattern
-            result = json.dumps(extraction_dict, indent=2, default=str)
-            self.logger.info(f"Successfully extracted {len(result)} characters")
+            # Return clean JSON array
+            result = json.dumps(products, indent=2, default=str)
 
             return result
-            
+
         except Exception as error:
             error_msg = f"Failed to extract content: {str(error)}"
             self.logger.error(f"{error_msg}")
             raise Exception(error_msg)
+
+
     
     async def act(self, action: str, variables: Optional[Dict[str, Any]] = None) -> str:
         """

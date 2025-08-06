@@ -109,7 +109,7 @@ class ExtractionAgent:
 
         Use simplified_stagehand_tool with:
         - operation: "extract"
-        - instruction: "Extract all products from this page. For each product get the name, description, price, image URL, and weight. Return as JSON array with no comments."
+        - instruction: "Extract all products from this page. For each product get: name, description, price, image URL from img src attribute, weight, category, and vendor"
 
         {feedback_instructions}
 

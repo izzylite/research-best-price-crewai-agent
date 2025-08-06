@@ -3,7 +3,7 @@
 from typing import Optional, Dict, Any, List
 from datetime import datetime, timezone
 from decimal import Decimal
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator, HttpUrl
 from pydantic_core import ValidationError
 
 
@@ -51,11 +51,12 @@ class StandardizedProduct(BaseModel):
     name: str = Field(..., description="Product title/name", min_length=1)
     description: str = Field(..., description="Product description", min_length=1)
     price: StandardizedPrice = Field(..., description="Product pricing information")
-    image_url: str = Field(..., description="Primary product image URL")
     category: str = Field(..., description="Product category", min_length=1)
     vendor: str = Field(..., description="Source website identifier", min_length=1)
     scraped_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), description="When the data was extracted")
-    
+
+    image_url: str = Field(..., description="Primary product image URL")
+
     # Optional fields
     weight: Optional[str] = Field(None, description="Product weight if available, null otherwise")
     
