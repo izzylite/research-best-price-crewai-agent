@@ -406,3 +406,443 @@ class ExtractionAgent:
             All products meet enhanced quality standards and requirements.
             """
         )
+
+    def create_product_search_extraction_task(self,
+                                            product_query: str,
+                                            retailer: str,
+                                            retailer_url: str,
+                                            session_id: str = None):
+        """
+        Create a task for targeted product search extraction focusing on core fields.
+
+        Uses custom schema for extraction:
+        {
+          "fields": {
+            "name": "str",           // Product name as displayed
+            "image": "optional_url", // Main product image URL (HttpUrl validation)
+            "price": "str"           // Product price in GBP format (£XX.XX)
+          },
+          "name": "Product",
+          "is_list": true
+        }
+
+        Args:
+            product_query: Specific product to search for
+            retailer: Name of the retailer website
+            retailer_url: URL to navigate to for extraction
+            session_id: Optional session identifier for tracking
+
+        Returns:
+            CrewAI Task configured for product extraction with schema validation
+        """
+        from crewai import Task
+
+        task_description = f"""
+        You are tasked with extracting product information from the {retailer} website for "{product_query}".
+         Your goal is to navigate to the provided URL and extract product name, image URL, and price using the simplified_stagehand_tool function.
+
+        **EXTRACTION PARAMETERS:**
+        Product Query: {product_query}
+        Retailer: {retailer}
+        Target URL: {retailer_url}
+        Session ID: {session_id}
+
+        **AVAILABLE TOOL:**
+        - simplified_stagehand_tool: Use this for all navigation and extraction operations
+
+        **STEP-BY-STEP PROCESS:**
+        1. **Navigate to URL:** Use simplified_stagehand_tool with operation "navigate" to go to {retailer_url}
+        2. **Handle Popups:** Use simplified_stagehand_tool with operation "act" to dismiss any popups, cookie banners, or overlays
+        3. **Search if needed:** If the URL is not a direct product page, use simplified_stagehand_tool with operation "act" to search for "{product_query}"
+        4. **Extract Product Data:** Use simplified_stagehand_tool with operation "extract" and custom schema to get:
+           - Product name (exact name as displayed)
+           - Product image URL (main product image)
+           - Product price (in GBP format with £ symbol)
+
+        **CUSTOM EXTRACTION SCHEMA:**
+        Use this exact schema definition for extraction:
+        {{
+          "fields": {{
+            "name": "str",
+            "image": "optional_url",
+            "price": "str"
+          }},
+          "name": "Product",
+          "is_list": true
+        }}
+
+        **EXTRACTION REQUIREMENTS:**
+        - Focus on products that match or closely relate to "{product_query}"
+        - Extract main product image URLs (not thumbnails or icons)
+        - Ensure prices are in GBP format (£XX.XX)
+        - Get direct product page URLs when possible
+        - Handle errors gracefully and document any issues
+
+        **ERROR HANDLING:**
+        - If navigation fails, document the error
+        - If product information is incomplete, extract what's available
+        - If no matching products found, report this clearly
+        - Include error details in the response for debugging
+
+        **CRITICAL INSTRUCTIONS:**
+        1. Always use the exact tool name "simplified_stagehand_tool"
+        2. Use appropriate operation parameters: "navigate", "act", or "extract"
+        3. For extraction, include the custom schema parameter:
+           Tool: simplified_stagehand_tool
+           Action Input: {{
+             "operation": "extract",
+             "instruction": "Extract product information for {product_query}",
+             "schema": {{
+               "fields": {{"name": "str", "image": "optional_url", "price": "str"}},
+               "name": "Product",
+               "is_list": true
+             }}
+           }}
+        4. Focus on extracting complete product information (name, image, price)
+        5. Validate that extracted data is relevant to "{product_query}"
+        """
+
+        return Task(
+            description=task_description,
+            agent=self.agent,
+            expected_output=f"""
+            Your final output should be a valid JSON string containing product information. Enclose your entire response within <json_output> tags.
+
+            Expected JSON structure:
+            <json_output>
+            {{
+              "products": [
+                {{
+                  "url": "{retailer_url}",
+                  "name": "Exact product name from site",
+                  "image": "https://example.com/images/product.jpg",
+                  "price": "£XX.XX"
+                }}
+              ],
+              "errors": [
+                "Any error messages encountered during extraction"
+              ],
+              "extraction_summary": {{
+                "search_query": "{product_query}",
+                "retailer": "{retailer}",
+                "total_products_found": <number>,
+                "extraction_successful": <true/false>
+              }}
+            }}
+            </json_output>
+
+            **IMPORTANT:**
+            - Include the <json_output> tags around your JSON response
+            - If no errors occur, you may omit the "errors" key
+            - Ensure all URLs, names, images, and prices are accurately extracted
+            - Handle any extraction errors gracefully and include them in the errors array
+            """
+        )
+
+    def create_multi_url_extraction_task(self,
+                                       urls: List[str],
+                                       product_query: str = "",
+                                       session_id: str = None):
+        """
+        Create a task for extracting product information from multiple URLs.
+
+        Uses custom schema for each URL extraction:
+        {
+          "fields": {
+            "name": "str",           // Product name as displayed
+            "image": "optional_url", // Main product image URL (HttpUrl validation)
+            "price": "str"           // Product price in GBP format (£XX.XX)
+          },
+          "name": "Product",
+          "is_list": false          // Single product per URL
+        }
+
+        Expected output format:
+        {
+          "products": [
+            {
+              "url": "https://example.com/product1",
+              "name": "Product Name",
+              "image": "https://example.com/image.jpg",
+              "price": "£19.99"
+            }
+          ],
+          "errors": ["Error messages if any"],
+          "extraction_summary": {
+            "total_urls_processed": N,
+            "successful_extractions": N,
+            "failed_extractions": N
+          }
+        }
+
+        Args:
+            urls: List of product URLs to extract information from
+            product_query: Optional context about what product to look for
+            session_id: Optional session identifier for tracking
+
+        Returns:
+            CrewAI Task configured for multi-URL extraction with error handling
+        """
+        from crewai import Task
+
+        urls_formatted = "\n".join(f"- {url}" for url in urls)
+
+        task_description = f"""
+        You are tasked with extracting product information from a list of URLs. Your goal is to navigate to each provided URL and extract the product name, image URL, and price using the simplified_stagehand_tool function. You will then compile this information into a JSON format.
+
+        **EXTRACTION PARAMETERS:**
+        Product Query Context: {product_query if product_query else "General product extraction"}
+        Session ID: {session_id}
+        Total URLs to Process: {len(urls)}
+
+        **AVAILABLE TOOL:**
+        - simplified_stagehand_tool: Use this for all navigation and extraction operations
+
+        **STEP-BY-STEP PROCESS FOR EACH URL:**
+        1. **Navigate to URL:** Use simplified_stagehand_tool with operation "navigate" to go to the URL
+        2. **Handle Popups:** Use simplified_stagehand_tool with operation "act" to dismiss any popups, cookie banners, or overlays
+        3. **Extract Product Data:** Use simplified_stagehand_tool with operation "extract" and custom schema:
+           Tool: simplified_stagehand_tool
+           Action Input: {{
+             "operation": "extract",
+             "instruction": "Extract product name, image URL, and price from this page",
+             "schema": {{
+               "fields": {{"name": "str", "image": "optional_url", "price": "str"}},
+               "name": "Product",
+               "is_list": false
+             }}
+           }}
+        4. **Handle Errors:** If extraction fails for any URL, document the error and continue with next URL
+
+        **EXTRACTION REQUIREMENTS:**
+        - Extract main product image URLs (full-size images, not thumbnails or icons)
+        - Ensure prices are in GBP format (£XX.XX) or note if different currency
+        - Get exact product names as displayed on the site
+        - Handle errors gracefully and document any issues
+        - Process all URLs even if some fail
+
+        **ERROR HANDLING:**
+        - If navigation fails for a URL, document the error and continue
+        - If product information is incomplete, extract what's available
+        - If a page doesn't contain product information, note this
+        - Include all error details in the response for debugging
+
+        **CRITICAL INSTRUCTIONS:**
+        1. Always use the exact tool name "simplified_stagehand_tool"
+        2. Use appropriate operation parameters: "navigate", "act", or "extract"
+        3. Process each URL independently
+        4. Compile results into the specified JSON format
+
+        **URLs TO PROCESS:**
+        {urls_formatted}
+        """
+
+        return Task(
+            description=task_description,
+            agent=self.agent,
+            expected_output=f"""
+            Your final output should be a valid JSON string containing an array of product objects and any error messages. Enclose your entire response within <json_output> tags.
+
+            Expected JSON structure:
+            <json_output>
+            {{
+              "products": [
+                {{
+                  "url": "https://example.com/product1",
+                  "name": "Example Product 1",
+                  "image": "https://example.com/images/product1.jpg",
+                  "price": "£19.99"
+                }},
+                {{
+                  "url": "https://example.com/product2",
+                  "name": "Example Product 2",
+                  "image": "https://example.com/images/product2.jpg",
+                  "price": "£29.99"
+                }}
+              ],
+              "errors": [
+                "Unable to extract information from https://example.com/product3: Page not found",
+                "Navigation failed for https://example.com/product4: Timeout"
+              ],
+              "extraction_summary": {{
+                "total_urls_processed": {len(urls)},
+                "successful_extractions": <number>,
+                "failed_extractions": <number>,
+                "extraction_complete": true
+              }}
+            }}
+            </json_output>
+
+            **IMPORTANT:**
+            - Include the <json_output> tags around your JSON response
+            - If no errors occur, you may omit the "errors" key from the JSON output
+            - Ensure all URLs, names, images, and prices are accurately extracted
+            - Handle any extraction errors gracefully and include them in the errors array
+            - Process all {len(urls)} URLs provided in the list
+            """
+        )
+
+    def create_feedback_enhanced_extraction_task(self,
+                                               product_query: str,
+                                               retailer: str,
+                                               retailer_url: str,
+                                               validation_feedback: Dict[str, Any],
+                                               attempt_number: int = 1,
+                                               session_id: str = None):
+        """
+        Create a task for feedback-enhanced product extraction that uses validation feedback to improve results.
+
+        Uses validation feedback to guide extraction improvements:
+        - Primary issues from previous attempt
+        - Retry recommendations for better extraction
+        - Extraction improvements suggested by validation
+        - Alternative search strategies
+
+        Uses custom schema for extraction:
+        {
+          "fields": {
+            "name": "str",           // Product name as displayed
+            "image": "optional_url", // Main product image URL (HttpUrl validation)
+            "price": "str"           // Product price in GBP format (£XX.XX)
+          },
+          "name": "Product",
+          "is_list": true
+        }
+
+        Args:
+            product_query: Specific product to search for
+            retailer: Name of the retailer website
+            retailer_url: URL to navigate to for extraction
+            validation_feedback: Feedback from previous validation attempt
+            attempt_number: Current retry attempt number
+            session_id: Optional session identifier for tracking
+
+        Returns:
+            CrewAI Task configured for feedback-enhanced extraction
+        """
+        from crewai import Task
+
+        # Extract feedback components
+        primary_issues = validation_feedback.get('primary_issues', [])
+        retry_recommendations = validation_feedback.get('retry_recommendations', [])
+        extraction_improvements = validation_feedback.get('extraction_improvements', [])
+        search_refinements = validation_feedback.get('search_refinements', [])
+
+        # Format feedback for task description
+        issues_text = "\n".join(f"- {issue}" for issue in primary_issues) if primary_issues else "- No specific issues identified"
+        recommendations_text = "\n".join(f"- {rec}" for rec in retry_recommendations) if retry_recommendations else "- Use standard extraction approach"
+        improvements_text = "\n".join(f"- {imp}" for imp in extraction_improvements) if extraction_improvements else "- Focus on core product fields"
+        refinements_text = "\n".join(f"- {ref}" for ref in search_refinements) if search_refinements else "- Use original search query"
+
+        task_description = f"""
+        You are tasked with extracting product information from the {retailer} website for "{product_query}".
+        This is retry attempt #{attempt_number} with validation feedback to improve extraction quality.
+
+        **EXTRACTION PARAMETERS:**
+        Product Query: {product_query}
+        Retailer: {retailer}
+        Target URL: {retailer_url}
+        Retry Attempt: {attempt_number}
+        Session ID: {session_id}
+
+        **VALIDATION FEEDBACK FROM PREVIOUS ATTEMPT:**
+
+        Primary Issues Identified:
+        {issues_text}
+
+        Retry Recommendations:
+        {recommendations_text}
+
+        Extraction Improvements Needed:
+        {improvements_text}
+
+        Search Query Refinements:
+        {refinements_text}
+
+        **FEEDBACK-ENHANCED EXTRACTION PROCESS:**
+        1. **Navigate to URL:** Use simplified_stagehand_tool with operation "navigate" to go to {retailer_url}
+        2. **Handle Popups:** Use simplified_stagehand_tool with operation "act" to dismiss any popups, cookie banners, or overlays
+        3. **Apply Feedback:** Implement the retry recommendations and extraction improvements listed above
+        4. **Enhanced Search:** If search refinements are suggested, try alternative search terms or approaches
+        5. **Improved Extraction:** Use simplified_stagehand_tool with operation "extract" and custom schema, focusing on the identified issues
+
+        **CUSTOM EXTRACTION SCHEMA:**
+        Use this exact schema definition for extraction:
+        {{
+          "fields": {{
+            "name": "str",
+            "image": "optional_url",
+            "price": "str"
+          }},
+          "name": "Product",
+          "is_list": true
+        }}
+
+        **EXTRACTION REQUIREMENTS:**
+        - Address all primary issues identified in the feedback
+        - Focus on products that closely match "{product_query}"
+        - Ensure product names are relevant and accurate
+        - Get high-quality product image URLs (main images, not thumbnails)
+        - Ensure prices are in GBP format with £ symbol
+        - Validate that extracted data addresses previous validation failures
+
+        **CRITICAL INSTRUCTIONS:**
+        1. Always use the exact tool name "simplified_stagehand_tool"
+        2. Use appropriate operation parameters: "navigate", "act", or "extract"
+        3. For extraction, include the custom schema parameter:
+           Tool: simplified_stagehand_tool
+           Action Input: {{
+             "operation": "extract",
+             "instruction": "Extract product information for {product_query}, addressing previous validation issues",
+             "schema": {{
+               "fields": {{"name": "str", "image": "optional_url", "price": "str"}},
+               "name": "Product",
+               "is_list": true
+             }}
+           }}
+        4. Apply all feedback recommendations to improve extraction quality
+        5. Focus on resolving the specific issues identified in previous attempt
+        """
+
+        return Task(
+            description=task_description,
+            agent=self.agent,
+            expected_output=f"""
+            Your final output should be a valid JSON string containing improved product information. Enclose your entire response within <json_output> tags.
+
+            Expected JSON structure:
+            <json_output>
+            {{
+              "products": [
+                {{
+                  "url": "{retailer_url}",
+                  "name": "Exact product name from site",
+                  "image": "https://example.com/images/product.jpg",
+                  "price": "£XX.XX"
+                }}
+              ],
+              "errors": [
+                "Any error messages encountered during extraction"
+              ],
+              "extraction_summary": {{
+                "search_query": "{product_query}",
+                "retailer": "{retailer}",
+                "retry_attempt": {attempt_number},
+                "feedback_applied": true,
+                "total_products_found": <number>,
+                "extraction_successful": <true/false>,
+                "improvements_made": [
+                  "List of specific improvements made based on feedback"
+                ]
+              }}
+            }}
+            </json_output>
+
+            **IMPORTANT:**
+            - Include the <json_output> tags around your JSON response
+            - Address all validation feedback from the previous attempt
+            - If no errors occur, you may omit the "errors" key
+            - Ensure all URLs, names, images, and prices are accurately extracted
+            - Document what improvements were made based on the feedback
+            """
+        )

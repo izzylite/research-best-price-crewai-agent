@@ -5,42 +5,59 @@ from crewai import Agent, LLM
 from ..config.settings import settings
 from ..config.sites import get_site_config_by_vendor, SiteConfig
 from ..utils.popup_handler import PopupHandler
+from ..tools.perplexity_retailer_research_tool import PerplexityRetailerResearchTool
 
 
 class NavigationAgent:
     """Specialized agent for ecommerce site navigation and pagination handling."""
 
     def __init__(self, stagehand_tool=None, verbose: bool = True, tools: List = None, llm: Optional[LLM] = None):
-        """Initialize the navigation agent with StagehandTool only."""
+        """Initialize the navigation agent with StagehandTool and Perplexity research tool."""
+        # Create Perplexity retailer research tool
+        perplexity_tool = PerplexityRetailerResearchTool()
+
         # Handle both old (tools, llm) and new (stagehand_tool, verbose) calling patterns
         if stagehand_tool is not None:
-            # New Flow-based calling pattern
-            tools = [stagehand_tool] if stagehand_tool else []
+            # New Flow-based calling pattern - add both tools
+            tools = [stagehand_tool, perplexity_tool] if stagehand_tool else [perplexity_tool]
         elif tools is None:
-            tools = []
+            tools = [perplexity_tool]
+        else:
+            # Add Perplexity tool to existing tools
+            tools.append(perplexity_tool)
         
         agent_config = {
-            "role": "Ecommerce Site Navigation and Pagination Specialist",
+            "role": "AI-Powered Retailer Research and Navigation Specialist",
             "goal": """
-            Navigate ecommerce websites efficiently and prepare pages for data extraction.
-            Handle all site-specific challenges including popups, dynamic content, and pagination
-            without extracting any product data - focus purely on navigation and page preparation.
+            Research UK retailers that sell specific products using AI-powered tools, then navigate
+            to those retailer websites and prepare pages for data extraction. Handle all site-specific
+            challenges including popups, dynamic content, and pagination without extracting any product
+            data - focus on retailer discovery, navigation and page preparation.
             """,
             "backstory": """
-            You are a specialized web navigation expert with deep knowledge of UK retail platforms
-            and their specific navigation patterns. Your sole responsibility is to navigate websites,
-            dismiss blocking elements, handle dynamic content loading, and manage pagination.
-            
+            You are a specialized AI-powered retailer research and web navigation expert with deep
+            knowledge of UK retail platforms and their specific navigation patterns. You have two
+            primary responsibilities: (1) Research UK retailers that sell specific products using
+            AI-powered tools, and (2) Navigate to those retailer websites, dismiss blocking elements,
+            handle dynamic content loading, and manage pagination.
+
             Your core expertise includes:
+            - AI-powered retailer discovery using Perplexity research for product-specific searches
+            - Identifying legitimate UK retailers (excluding price comparison sites)
+            - Finding direct product URLs and availability information
             - Multi-vendor popup handling (cookie consent, age verification, newsletters, location selection)
             - Dynamic content loading (infinite scroll, "Load More" buttons, lazy loading)
             - Pagination detection and navigation (next/previous buttons, page numbers, infinite scroll)
-            - Site-specific navigation patterns for UK retailers (ASDA, Tesco, Waitrose, etc.)
+            - Site-specific navigation patterns for UK retailers (ASDA, Tesco, Waitrose, Amazon UK, etc.)
             - Page preparation and verification for extraction readiness
             - Error recovery and alternative navigation strategies
             - Respectful navigation with appropriate delays and rate limiting
-            
-            CRITICAL: You NEVER extract product data - your job is purely navigation and page preparation.
+
+            TOOLS AVAILABLE:
+            - perplexity_retailer_research_tool: Use this to research UK retailers that sell specific products
+            - simplified_stagehand_tool: Use this for web navigation and page preparation
+
+            CRITICAL: You NEVER extract product data - your job is retailer research, navigation and page preparation.
             Once a page is ready, you signal completion and let the ExtractionAgent handle data extraction.
             """,
             "verbose": verbose,
@@ -392,5 +409,69 @@ class NavigationAgent:
 
             Example ready: {{"status": "page_ready", "verification_info": {{"elements_verified": ["product_listings", "navigation"], "extraction_ready": true}}}}
             Example not ready: {{"status": "still_loading", "verification_info": {{"loading_indicators": ["product_spinner"], "extraction_ready": false}}}}
+            """
+        )
+
+    def create_retailer_research_task(self,
+                                    product_query: str,
+                                    max_retailers: int = 5,
+                                    session_id: str = None):
+        """Create a task for researching UK retailers that sell a specific product."""
+        from crewai import Task
+
+        task_description = f"""
+        Research UK retailers that sell "{product_query}" using AI-powered research tools.
+
+        Product Query: {product_query}
+        Max Retailers: {max_retailers}
+        Session ID: {session_id}
+
+        RETAILER RESEARCH WORKFLOW:
+        1. **Use the perplexity_retailer_research_tool to research UK retailers**
+        2. **Call the tool with these exact parameters:**
+           - product_query: "{product_query}"
+           - max_retailers: {max_retailers}
+        3. **Focus on finding legitimate UK retailers that sell products directly**
+        4. **Exclude price comparison sites and affiliate marketing sites**
+        5. **Prioritize major UK retailers like ASDA, Tesco, Amazon UK, eBay UK, Argos, etc.**
+        6. **Get direct product URLs where possible**
+
+        TOOLS AVAILABLE:
+        - perplexity_retailer_research_tool: Use this to research retailers that sell the specific product
+
+        RESEARCH REQUIREMENTS:
+        - Find retailers that actually sell the product, not just general retailers
+        - Get direct product URLs when available
+        - Include pricing information if found
+        - Verify retailer legitimacy (exclude comparison sites, affiliate sites)
+        - Focus on UK-based retailers with online presence
+
+        IMPORTANT: Use the perplexity_retailer_research_tool to get comprehensive retailer information.
+        Do not make assumptions - use the research tool to get real data about where this product is sold.
+        """
+
+        return Task(
+            description=task_description,
+            agent=self.agent,
+            expected_output=f"""
+            Retailer research result:
+            {{
+              "product_query": "{product_query}",
+              "retailers": [
+                {{
+                  "name": "Retailer Name",
+                  "website": "retailer-domain.co.uk",
+                  "product_url": "direct URL to product page if found",
+                  "price": "£XX.XX or 'Price not available'",
+                  "availability": "In stock/Out of stock/Unknown",
+                  "notes": "Any relevant information about this retailer's offering"
+                }}
+              ],
+              "research_summary": "Brief summary of findings and recommendations",
+              "total_found": <number_of_retailers>,
+              "research_complete": true
+            }}
+
+            Provide comprehensive retailer research results with direct product URLs where possible.
             """
         )

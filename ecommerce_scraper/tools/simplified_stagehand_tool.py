@@ -29,6 +29,10 @@ class SimplifiedStagehandInput(BaseModel):
         default=None,
         description="Instruction for extract/observe operations"
     )
+    schema: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Custom Pydantic schema definition for extract operations (JSON format)"
+    )
     action: Optional[str] = Field(
         default=None,
         description="Action to perform for act operations"
@@ -62,10 +66,31 @@ class SimplifiedStagehandTool(BaseTool):
     Simplified browser automation tool using Stagehand with official API patterns.
 
     Available operations:
-    - extract: Extract structured data using natural language instructions
+    - extract: Extract structured data using natural language instructions with flexible schemas
     - act: Perform atomic actions like clicking, typing, scrolling
     - observe: Identify and observe page elements
     - navigate: Navigate to URLs
+
+    EXTRACT OPERATION WITH CUSTOM SCHEMAS:
+    Supports flexible schema definitions for precise data extraction:
+
+    Example usage:
+    {
+      "operation": "extract",
+      "instruction": "Extract product information",
+      "schema": {
+        "fields": {
+          "name": "str",
+          "image": "optional_url",
+          "price": "str"
+        },
+        "name": "Product",
+        "is_list": true
+      }
+    }
+
+    Schema field types: str, optional_str, url, optional_url, int, float
+    Auto URL detection for fields containing: url, link, image, href
 
     Use detailed, specific instructions for best results.
     """
@@ -125,9 +150,10 @@ class SimplifiedStagehandTool(BaseTool):
             # Dispatch to appropriate method
             if operation == "extract":
                 instruction = kwargs.get("instruction", "")
+                schema = kwargs.get("schema")
                 if not instruction:
                     raise ValueError("extract operation requires 'instruction' parameter")
-                return run_async(self.extract(instruction))
+                return run_async(self.extract(instruction, schema))
 
             elif operation == "act":
                 action = kwargs.get("action", "")
@@ -185,6 +211,8 @@ class SimplifiedStagehandTool(BaseTool):
     def logger(self):
         """Access logger through property to avoid Pydantic field issues."""
         return self._logger
+
+
     
     async def _get_stagehand(self):
         """Get or create Stagehand instance using official v0.5.0 API."""
@@ -208,24 +236,27 @@ class SimplifiedStagehandTool(BaseTool):
                 if not model_api_key:
                     raise Exception("OpenAI API key is required for Stagehand operations. Set OPENAI_API_KEY environment variable.")
 
-                # Create Stagehand instance using official v0.5.0 API pattern
-                # This matches the working pattern from our test
-                stagehand_config = {
-                    "env": "BROWSERBASE",
-                    "api_key": api_key,
-                    "project_id": project_id,
-                    "model_name": "gpt-4o",
-                    "model_api_key": model_api_key,
-                }
+                # Create Stagehand instance using official Python API pattern
+                # Based on official Python documentation (uses snake_case)
+                from stagehand import StagehandConfig
+
+                stagehand_config = StagehandConfig(
+                    env="BROWSERBASE",
+                    api_key=api_key,  # Python API uses snake_case
+                    project_id=project_id,  # Python API uses snake_case
+                    model_name="openai/gpt-4o",  # Python API format
+                    verbose=1,
+                )
 
                 # CRITICAL FIX: Add session_id for session reuse if provided
                 if self.session_id:
-                    stagehand_config["browserbase_session_id"] = self.session_id
+                    # For Python API, session reuse might be handled differently
                     self.logger.info(f"Reusing Browserbase session: {self.session_id}")
                 else:
                     self.logger.info("Creating new Browserbase session")
 
-                self._stagehand = Stagehand(**stagehand_config)
+                # Create Stagehand instance with config and model API key
+                self._stagehand = Stagehand(stagehand_config, model_api_key=model_api_key)
 
                 # Initialize following official pattern
                 await self._stagehand.init()
@@ -261,87 +292,233 @@ class SimplifiedStagehandTool(BaseTool):
 
         return self._stagehand
     
-    async def extract(self, instruction: str) -> str:
+    async def extract(self, instruction: str, schema: Optional[Dict[str, Any]] = None) -> str:
         """
-        Extract structured data using schema-based extraction.
+        Extract structured data using schema-based extraction with flexible schemas.
 
-        Following official Stagehand pattern with Pydantic schema.
+        Following official Stagehand pattern with dynamic Pydantic schema support.
+
+        Schema Format:
+        {
+          "fields": {
+            "field_name": "field_type",    // Supported types: str, optional_str, url, optional_url, int, float
+            "another_field": "field_type"
+          },
+          "name": "ModelName",             // Name for the generated Pydantic model
+          "is_list": true/false            // Whether to extract multiple items or single item
+        }
+
+        Field Types:
+        - "str": Required string field
+        - "optional_str": Optional string field (can be null)
+        - "url": Required URL field (uses Pydantic HttpUrl for validation)
+        - "optional_url": Optional URL field (uses Optional[HttpUrl])
+        - "int": Required integer field
+        - "float": Required float field
+
+        Auto URL Detection:
+        Fields with names containing 'url', 'link', 'image', or 'href' are automatically
+        treated as URL fields even when using 'str' or 'optional_str' types.
+
+        Default Schema (if none provided):
+        {
+          "fields": {
+            "name": "str",
+            "price": "str",
+            "url": "optional_url",
+            "image": "optional_url",
+            "description": "optional_str"
+          },
+          "name": "Product",
+          "is_list": true
+        }
 
         Args:
             instruction: Detailed instruction for what to extract
+            schema: Optional custom schema definition in JSON format
 
         Returns:
-            JSON string with extracted data
+            JSON string with extracted data matching the schema structure
         """
         try:
             stagehand = await self._get_stagehand()
 
             self.logger.info(f"Schema-based extraction: {instruction[:100]}...")
 
-            # Create a simple, flexible schema following official documentation
-            from typing import List, Optional
-            from pydantic import BaseModel
+            # Dynamic schema creation will be handled in helper methods
 
-            class Product(BaseModel):
-                name: str
-                description: str
-                price: str
-                image_url: Optional[str] = None  # Optional field
-                weight: Optional[str] = None
-                category: str
-                vendor: str
-
-            class ProductList(BaseModel):
-                products: List[Product]
+            # Create schema based on provided definition or use default
+            if schema:
+                self.logger.info("Using custom schema provided by agent")
+                extraction_schema = self._create_dynamic_schema(schema)
+            else:
+                self.logger.info("Using default product schema")
+                extraction_schema = self._create_default_schema()
 
             # Use schema-based extraction following official documentation
-            # Simplified instruction focusing on what actually works
-            detailed_instruction = f"""
-            {instruction}
-
-            Extract all products from this page. For each product, extract:
-            - name: Product name/title
-            - description: Product description if available
-            - price: Product price (e.g., "£1.97")
-            - weight: Product weight/size (e.g., "150g", "400g")
-            - category: Product category
-            - vendor: Vendor name
-            - image_url: Set to null (will be handled separately)
-
-            Return valid JSON with all required fields.
-            """
-
             extraction = await stagehand.page.extract(
-                detailed_instruction,
-                schema=ProductList
+                instruction,
+                schema=extraction_schema
             )
 
             # Handle the extraction result
-            if hasattr(extraction, 'model_dump'):
-                # Pydantic model - get the products list
-                result_dict = extraction.model_dump()
-                products = result_dict.get('products', [])
-            elif hasattr(extraction, 'products'):
-                # Direct access to products
-                products = extraction.products
-                if hasattr(products[0], 'model_dump'):
-                    products = [p.model_dump() for p in products]
-            else:
-                # Fallback - assume it's already a list
-                products = extraction if isinstance(extraction, list) else []
+            result_data = self._process_extraction_result(extraction)
 
             # Log extraction success
-            self.logger.info(f"Successfully extracted {len(products)} products")
+            if isinstance(result_data, list):
+                self.logger.info(f"Successfully extracted {len(result_data)} items")
+            elif isinstance(result_data, dict):
+                items_count = len(result_data.get('products', result_data.get('items', [])))
+                self.logger.info(f"Successfully extracted {items_count} items")
+            else:
+                self.logger.info("Extraction completed")
 
-            # Return clean JSON array
-            result = json.dumps(products, indent=2, default=str)
-
+            # Return clean JSON
+            result = json.dumps(result_data, indent=2, default=str)
             return result
 
         except Exception as error:
             error_msg = f"Failed to extract content: {str(error)}"
             self.logger.error(f"{error_msg}")
             raise Exception(error_msg)
+
+    def _create_dynamic_schema(self, schema_def: Dict[str, Any]) -> type[BaseModel]:
+        """
+        Create a dynamic Pydantic schema from JSON definition.
+
+        Args:
+            schema_def: Schema definition in JSON format
+
+        Returns:
+            Dynamically created Pydantic model class
+        """
+        try:
+            from typing import List, Optional
+            from pydantic import create_model, HttpUrl
+
+            # Handle different schema formats
+            if 'fields' in schema_def:
+                # Format: {"fields": {"name": "str", "price": "str"}, "name": "Product"}
+                fields = schema_def['fields']
+                model_name = schema_def.get('name', 'DynamicModel')
+
+                # Convert field definitions to Pydantic format
+                pydantic_fields = {}
+                for field_name, field_type in fields.items():
+                    # Check if field name suggests it's a URL/link
+                    is_url_field = any(keyword in field_name.lower() for keyword in ['url', 'link', 'image', 'href'])
+
+                    if field_type == 'str':
+                        if is_url_field:
+                            pydantic_fields[field_name] = (HttpUrl, ...)
+                        else:
+                            pydantic_fields[field_name] = (str, ...)
+                    elif field_type == 'optional_str':
+                        if is_url_field:
+                            pydantic_fields[field_name] = (Optional[HttpUrl], None)
+                        else:
+                            pydantic_fields[field_name] = (Optional[str], None)
+                    elif field_type == 'url':
+                        pydantic_fields[field_name] = (HttpUrl, ...)
+                    elif field_type == 'optional_url':
+                        pydantic_fields[field_name] = (Optional[HttpUrl], None)
+                    elif field_type == 'int':
+                        pydantic_fields[field_name] = (int, ...)
+                    elif field_type == 'float':
+                        pydantic_fields[field_name] = (float, ...)
+                    else:
+                        # Default to string (but check for URL field names)
+                        if is_url_field:
+                            pydantic_fields[field_name] = (Optional[HttpUrl], None)
+                        else:
+                            pydantic_fields[field_name] = (str, ...)
+
+                # Create the model
+                ItemModel = create_model(model_name, **pydantic_fields)
+
+                # If this is for a list of items, create a wrapper
+                if schema_def.get('is_list', True):
+                    ListModel = create_model(
+                        f"{model_name}List",
+                        items=(List[ItemModel], ...)
+                    )
+                    return ListModel
+                else:
+                    return ItemModel
+
+            else:
+                # Fallback to default schema
+                self.logger.warning("Invalid schema format, using default")
+                return self._create_default_schema()
+
+        except Exception as e:
+            self.logger.error(f"Failed to create dynamic schema: {e}")
+            return self._create_default_schema()
+
+    def _create_default_schema(self) -> type[BaseModel]:
+        """Create the default product extraction schema with proper URL types."""
+        from typing import List, Optional
+        from pydantic import BaseModel, HttpUrl
+
+        class Product(BaseModel):
+            name: str
+            price: str
+            url: Optional[HttpUrl] = None
+            image: Optional[HttpUrl] = None
+            description: Optional[str] = None
+
+        class ProductList(BaseModel):
+            products: List[Product]
+
+        return ProductList
+
+    def _process_extraction_result(self, extraction: Any) -> Any:
+        """
+        Process the extraction result into a consistent format.
+
+        Args:
+            extraction: Raw extraction result from Stagehand
+
+        Returns:
+            Processed data structure
+        """
+        try:
+            # Handle Pydantic model result
+            if hasattr(extraction, 'model_dump'):
+                result_dict = extraction.model_dump()
+
+                # If it has a list field (products, items, etc.), return that
+                for key in ['products', 'items', 'data', 'results']:
+                    if key in result_dict:
+                        return result_dict[key]
+
+                # Otherwise return the whole dict
+                return result_dict
+
+            # Handle direct list access
+            elif hasattr(extraction, 'products'):
+                products = extraction.products
+                if hasattr(products[0], 'model_dump') if products else False:
+                    return [p.model_dump() for p in products]
+                return products
+
+            elif hasattr(extraction, 'items'):
+                items = extraction.items
+                if hasattr(items[0], 'model_dump') if items else False:
+                    return [i.model_dump() for i in items]
+                return items
+
+            # Handle already processed data
+            elif isinstance(extraction, (list, dict)):
+                return extraction
+
+            else:
+                # Last resort - try to convert to dict
+                return dict(extraction) if hasattr(extraction, '__dict__') else extraction
+
+        except Exception as e:
+            self.logger.warning(f"Error processing extraction result: {e}")
+            return extraction
 
 
     

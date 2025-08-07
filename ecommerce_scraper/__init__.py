@@ -8,7 +8,13 @@ from various ecommerce platforms using AI-driven browser automation.
 __version__ = "0.1.0"
 __author__ = "Ecommerce Scraper Team"
 
-from .main import EcommerceScraper
-from .schemas.product import Product, ProductVariant, ProductImage
+from .schemas.product_search_result import ProductSearchResult, ProductSearchItem
+from .schemas.product_search_extraction import ProductSearchExtraction
+from .workflows.product_search_flow import ProductSearchFlow
 
-__all__ = ["EcommerceScraper", "Product", "ProductVariant", "ProductImage"]
+__all__ = [
+    "ProductSearchResult",
+    "ProductSearchItem",
+    "ProductSearchExtraction",
+    "ProductSearchFlow"
+]

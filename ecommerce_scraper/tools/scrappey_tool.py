@@ -8,7 +8,7 @@ from crewai.tools import BaseTool
 from pydantic import BaseModel, Field
 
 from ..config.settings import settings
-from ..schemas.standardized_product import StandardizedProduct
+from ..schemas.product_search_extraction import ProductSearchExtraction
 
 
 class ScrappeyInput(BaseModel):
@@ -63,8 +63,7 @@ class ScrappeyTool(BaseTool):
     def _run(self, **kwargs) -> str:
         """Execute Scrappey extraction based on the instruction and extraction type."""
         try:
-            url = kwargs.get("url")
-            instruction = kwargs.get("instruction")
+            url = kwargs.get("url") 
             vendor = kwargs.get("vendor")
             category = kwargs.get("category")
             extraction_type = kwargs.get("extraction_type", "products")
@@ -78,8 +77,7 @@ class ScrappeyTool(BaseTool):
 
             # Build Scrappey request payload
             payload = self._build_payload(
-                url=url,
-                instruction=instruction,
+                url=url, 
                 vendor=vendor,
                 category=category,
                 extraction_type=extraction_type,
@@ -116,7 +114,7 @@ class ScrappeyTool(BaseTool):
             self._logger.error(error_msg)
             return error_msg
 
-    def _build_payload(self, url: str, instruction: str, vendor: str, category: str,
+    def _build_payload(self, url: str,  vendor: str, category: str,
                       extraction_type: str, use_browser: bool, wait_time: Optional[int]) -> Dict[str, Any]:
         """Build Scrappey API request payload based on extraction type."""
 

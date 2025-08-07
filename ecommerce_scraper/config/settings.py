@@ -48,6 +48,9 @@ class Settings(BaseSettings):
 
     # Scrappey Configuration
     scrappey_api_key: str = Field("SCmmAiI9H2CnerD8ex4YOcvkmMzQgH0P3DyOWmuqk6Mp9YHmn8Fk2AKxF6nj", env="SCRAPPEY_API_KEY")
+
+    # Perplexity Configuration
+    perplexity_api_key: str = Field("", env="PERPLEXITY_API_KEY")
     
     @field_validator('browserbase_api_key', 'browserbase_project_id')
     @classmethod
@@ -67,7 +70,8 @@ class Settings(BaseSettings):
     model_config = {
         # Look for .env in the project root directory
         "env_file": Path(__file__).parent.parent.parent / ".env",
-        "env_file_encoding": "utf-8"
+        "env_file_encoding": "utf-8",
+        "extra": "allow"  # Allow extra fields for new configurations
     }
     
     def get_model_api_key(self) -> str:

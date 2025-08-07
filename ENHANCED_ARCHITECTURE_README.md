@@ -1,39 +1,47 @@
-# Enhanced Multi-Agent Ecommerce Scraper Architecture
+# Product-Specific Search Scraper Architecture
 
 ## 🚀 Overview
 
-The Enhanced Multi-Agent Architecture is a complete ecommerce scraper implementation featuring a cyclical, feedback-driven workflow with specialized agents, persistent storage, and comprehensive monitoring. This is the only architecture available in the project.
+The Product-Specific Search Scraper is a complete AI-powered search system that allows users to search for specific products across UK retailers using intelligent retailer discovery, targeted extraction, and validation with feedback loops. This system replaces the category-based scraping approach with a more focused, product-centric methodology.
 
 ## 🏗️ Architecture Components
 
 ### 🤖 Specialized Agents
 
-#### NavigationAgent
-- **Purpose**: Site navigation, popup handling, and pagination
-- **Responsibilities**: 
-  - Navigate to category pages
-  - Dismiss blocking popups and overlays
-  - Handle dynamic content loading
-  - Manage pagination detection and navigation
-- **Tools**: StagehandTool only
-
-#### ExtractionAgent  
-- **Purpose**: Pure data extraction with StandardizedProduct compliance
+#### Enhanced NavigationAgent (AI-Powered Retailer Research)
+- **Purpose**: AI-powered retailer discovery and navigation
 - **Responsibilities**:
-  - Extract product data from prepared pages
-  - Handle re-extraction based on ValidationAgent feedback
-  - Ensure schema compliance
-  - Support batch processing
-- **Tools**: StagehandTool + PriceExtractor + ImageExtractor
+  - Research UK retailers using Perplexity AI for specific products
+  - Identify legitimate retailers (exclude price comparison sites)
+  - Find direct product URLs where possible
+  - Navigate to retailer websites and product pages
+  - Handle popups and site-specific challenges
+- **Tools**:
+  - PerplexityRetailerResearchTool for AI research
+  - SimplifiedStagehandTool for web automation
+- **Output**: List of researched retailers with product URLs and availability
 
-#### ValidationAgent
-- **Purpose**: Data validation, feedback generation, and persistent storage
+#### Targeted ExtractionAgent
+- **Purpose**: Product-specific data extraction with core field focus
 - **Responsibilities**:
-  - Validate extracted data against StandardizedProduct schema
-  - Generate feedback for re-extraction when needed
-  - Manage JSON file storage with atomic updates
-  - Handle deduplication across pages
-- **Tools**: ProductDataValidator + File I/O operations
+  - Extract only core fields: product name, price (GBP), direct URL
+  - Focus on products matching the search query
+  - Validate product relevance during extraction
+  - Ensure URLs are direct product pages, not search results
+- **Tools**: SimplifiedStagehandTool with targeted extraction schemas
+- **Output**: Focused product data with core fields only
+
+#### ProductSearchValidationAgent
+- **Purpose**: Intelligent validation with feedback loops and retry logic
+- **Responsibilities**:
+  - Validate product name matches search query (semantic matching)
+  - Verify URLs are from legitimate UK retailers
+  - Ensure URLs lead to purchasable product pages
+  - Generate specific feedback for failed validations
+  - Recommend retry strategies and alternative retailers
+  - Limit retry attempts to maximum 3 per product search
+- **Tools**: Built-in validation algorithms and feedback generation
+- **Output**: Validated products and retry recommendations
 
 ### 🔄 Cyclical Workflow
 

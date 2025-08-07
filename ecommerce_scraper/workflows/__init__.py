@@ -1,16 +1,8 @@
-"""Workflows module for CrewAI Flow-based ecommerce scraping."""
+"""Workflows module for CrewAI Flow-based product search scraping."""
 
-from .ecommerce_flow import EcommerceScrapingFlow, EcommerceScrapingState
-from .flow_utils import FlowResultProcessor, FlowStateManager, FlowPerformanceMonitor
-from .flow_routing import FlowRouter, FlowAction, ValidationResult
+from .product_search_flow import ProductSearchFlow, ProductSearchState
 
 __all__ = [
-    "EcommerceScrapingFlow",
-    "EcommerceScrapingState",
-    "FlowResultProcessor",
-    "FlowStateManager",
-    "FlowPerformanceMonitor",
-    "FlowRouter",
-    "FlowAction",
-    "ValidationResult"
+    "ProductSearchFlow",
+    "ProductSearchState"
 ]
