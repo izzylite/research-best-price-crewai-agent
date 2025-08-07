@@ -15,6 +15,7 @@ class RetailerResearchInput(BaseModel):
     """Input schema for retailer research."""
     product_query: str = Field(..., description="Specific product to search for (e.g., 'iPhone 15 Pro', 'Samsung Galaxy S24')")
     max_retailers: int = Field(5, description="Maximum number of retailers to find")
+    search_instructions: Optional[str] = Field(None, description="Optional enhanced search instructions based on feedback (e.g., 'Focus on major UK supermarkets, avoid price comparison sites')")
 
 
 class PerplexityRetailerResearchTool(BaseTool):
@@ -50,7 +51,8 @@ class PerplexityRetailerResearchTool(BaseTool):
     def _run(
         self,
         product_query: str,
-        max_retailers: int = 5
+        max_retailers: int = 5,
+        search_instructions: Optional[str] = None
     ) -> str:
         """
         Research UK retailers that sell the specified product.
@@ -58,19 +60,22 @@ class PerplexityRetailerResearchTool(BaseTool):
         Args:
             product_query: Specific product to search for
             max_retailers: Maximum number of retailers to find
+            search_instructions: Optional enhanced search instructions based on feedback
 
         Returns:
             JSON string with retailer information and product URLs
         """
         try:
             self._logger.info(f"[PERPLEXITY] Researching retailers for: {product_query}")
+            if search_instructions:
+                self._logger.info(f"[PERPLEXITY] Using enhanced search instructions: {search_instructions[:100]}...")
 
             if not self._api_key:
                 return self._fallback_retailer_result(product_query, max_retailers)
 
-            # Build research prompt
+            # Build research prompt (now uses search_instructions if provided)
             prompt = self._build_retailer_research_prompt(
-                product_query, max_retailers
+                product_query, max_retailers, search_instructions
             )
 
             # Call Perplexity API
@@ -91,11 +96,34 @@ class PerplexityRetailerResearchTool(BaseTool):
     def _build_retailer_research_prompt(
         self,
         product_query: str,
-        max_retailers: int
+        max_retailers: int,
+        search_instructions: Optional[str] = None
     ) -> str:
         """Build context-aware prompt for retailer research."""
 
-        prompt = f"""You are tasked with finding UK retailers that currently sell "{product_query}" online. Your goal is to provide accurate and up-to-date information about where UK customers can purchase this product.
+        if search_instructions:
+            # Use enhanced search instructions when provided (feedback-driven)
+            prompt = f"""{search_instructions}
+
+Present your findings for at least 3 different retailers (if available) and no more than {max_retailers}. If you cannot find at least 3 retailers, explain why in your response.
+
+Format your response as JSON list as follows:
+[
+{{
+"vendor": "[Retailer Name]",
+"url": "[Product URL]",
+"price": "£[Price]"
+}}
+]
+
+Repeat this format for each retailer you find.
+
+If you encounter any issues or limitations during your search, such as the product being out of stock everywhere or only available from non-UK retailers, please mention this in your response.
+
+Remember, your final output should only include the retailer information in the specified format, along with any necessary explanations about your findings. Do not include any of your search process or internal thoughts in the final response."""
+        else:
+            # Default prompt when no enhanced instructions are provided
+            prompt = f"""You are tasked with finding UK retailers that currently sell "{product_query}" online. Your goal is to provide accurate and up-to-date information about where UK customers can purchase this product.
 
 Follow these guidelines:
 1. Search for reputable UK-based online retailers that sell the specified product.
@@ -139,7 +167,29 @@ Remember, your final output should only include the retailer information in the 
                 "messages": [
                     {
                         "role": "system",
-                        "content": "You are an expert UK retail researcher specializing in finding legitimate online retailers that sell specific products. You have comprehensive knowledge of UK ecommerce sites and can find direct product URLs."
+                        "content": """You are an expert UK retail researcher specializing in finding legitimate online retailers that sell specific products. You have comprehensive knowledge of UK ecommerce sites and can find direct product URLs.
+
+CORE RESEARCH GUIDELINES:
+1. Search for reputable UK-based online retailers that sell the specified product
+2. Focus on sources where customers can actually make a purchase, not comparison websites or marketplaces
+3. Verify that the retailer ships to UK addresses
+4. Ensure the product is currently in stock and available for purchase
+5. Prioritize major UK retailers like ASDA, Tesco, Waitrose, Amazon UK, eBay UK, Argos, Currys, John Lewis, Next, Marks & Spencer
+6. Avoid price comparison sites (PriceRunner, Shopping.com, Google Shopping, Kelkoo)
+7. Avoid affiliate marketing sites that redirect to other retailers
+8. Get direct product page URLs, not search result pages or category pages
+
+RESPONSE FORMAT:
+Always format your response as a JSON array with this exact structure:
+[
+{
+"vendor": "[Retailer Name]",
+"url": "[Direct Product URL]",
+"price": "£[Price]"
+}
+]
+
+Provide accurate, up-to-date information and ensure all URLs lead directly to purchasable product pages."""
                     },
                     {
                         "role": "user",

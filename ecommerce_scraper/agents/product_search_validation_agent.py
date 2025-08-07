@@ -134,9 +134,12 @@ class ProductSearchValidationAgent:
         
         FEEDBACK GENERATION (if validation fails):
         - Identify specific issues with each failed product
+        - Determine if issues are research-related (wrong retailers, bad URLs) or extraction-related (data quality)
+        - Generate targeted feedback for ResearchAgent (retailer discovery, URL validation)
+        - Generate targeted feedback for ExtractionAgent (data extraction improvements)
         - Suggest alternative search terms or retailers
         - Recommend different extraction strategies
-        - Provide retry guidance for the NavigationAgent
+        - Provide retry guidance for both ResearchAgent and ExtractionAgent
         """
 
         return Task(
@@ -170,15 +173,33 @@ class ProductSearchValidationAgent:
                 "issues_found": [
                   "Specific validation issues"
                 ],
-                "retry_recommendations": [
-                  "Specific suggestions for retry attempts"
-                ],
-                "alternative_retailers": [
-                  "Suggested alternative retailers to try"
-                ],
-                "search_refinements": [
-                  "Suggested search query refinements"
-                ]
+                "research_feedback": {{
+                  "target_agent": "ResearchAgent",
+                  "issues": [
+                    "Research-related issues (wrong retailers, bad URLs, etc.)"
+                  ],
+                  "retry_recommendations": [
+                    "Specific suggestions for ResearchAgent retry attempts"
+                  ],
+                  "alternative_retailers": [
+                    "Suggested alternative retailers to try"
+                  ],
+                  "search_refinements": [
+                    "Suggested search query refinements"
+                  ]
+                }},
+                "extraction_feedback": {{
+                  "target_agent": "ExtractionAgent",
+                  "issues": [
+                    "Extraction-related issues (data quality, missing fields, etc.)"
+                  ],
+                  "retry_recommendations": [
+                    "Specific suggestions for ExtractionAgent retry attempts"
+                  ],
+                  "extraction_improvements": [
+                    "Suggested changes to extraction approach"
+                  ]
+                }}
               }}
             }}
             
@@ -305,3 +326,117 @@ class ProductSearchValidationAgent:
         
         # Check for legitimate UK retailers
         return any(domain in url_lower for domain in uk_retailer_domains)
+
+    def create_targeted_feedback_task(self,
+                                    search_query: str,
+                                    validation_failures: List[Dict[str, Any]],
+                                    retailer: str,
+                                    attempt_number: int = 1,
+                                    max_attempts: int = 3,
+                                    session_id: str = None):
+        """Create a task for generating targeted feedback for both ResearchAgent and ExtractionAgent."""
+
+        task_description = f"""
+        Generate targeted feedback for both ResearchAgent and ExtractionAgent based on validation failures.
+
+        Search Query: {search_query}
+        Retailer: {retailer}
+        Attempt Number: {attempt_number} of {max_attempts}
+        Session ID: {session_id}
+        Validation Failures: {len(validation_failures)}
+
+        TARGETED FEEDBACK ANALYSIS:
+        1. **Categorize validation failures by root cause**
+        2. **Identify research-related issues vs extraction-related issues**
+        3. **Generate specific feedback for ResearchAgent**
+        4. **Generate specific feedback for ExtractionAgent**
+        5. **Determine which agent should retry first**
+
+        RESEARCH-RELATED ISSUES (for ResearchAgent):
+        - Wrong or illegitimate retailers discovered
+        - Invalid or inaccessible product URLs
+        - Retailers that don't actually sell the product
+        - Price comparison sites instead of direct retailers
+        - Search query too broad or narrow for effective research
+
+        EXTRACTION-RELATED ISSUES (for ExtractionAgent):
+        - Missing or incomplete product data
+        - Incorrect price formatting or currency
+        - Poor quality or missing product images
+        - Inaccurate product names or descriptions
+        - Schema compliance issues
+
+        FEEDBACK PRIORITIZATION:
+        - If >50% of issues are research-related: Prioritize ResearchAgent retry
+        - If >50% of issues are extraction-related: Prioritize ExtractionAgent retry
+        - If mixed issues: Suggest ResearchAgent retry first, then ExtractionAgent
+
+        RETRY STRATEGY RECOMMENDATIONS:
+        - Assess likelihood of success for each agent retry
+        - Suggest specific improvements for each agent
+        - Recommend alternative approaches if standard retry unlikely to succeed
+        """
+
+        return Task(
+            description=task_description,
+            agent=self.agent,
+            expected_output=f"""
+            Targeted feedback analysis result:
+            {{
+              "search_query": "{search_query}",
+              "retailer": "{retailer}",
+              "attempt_number": {attempt_number},
+              "max_attempts": {max_attempts},
+              "failure_analysis": {{
+                "total_failures": {len(validation_failures)},
+                "research_related_failures": <number>,
+                "extraction_related_failures": <number>,
+                "primary_failure_type": "research|extraction|mixed"
+              }},
+              "research_feedback": {{
+                "target_agent": "ResearchAgent",
+                "should_retry": <true/false>,
+                "priority": "high|medium|low",
+                "issues": [
+                  "Specific research-related issues identified"
+                ],
+                "retry_recommendations": [
+                  "Specific actions for ResearchAgent to improve"
+                ],
+                "alternative_retailers": [
+                  "Better UK retailers to research and try"
+                ],
+                "search_refinements": [
+                  "Improved search queries or strategies"
+                ]
+              }},
+              "extraction_feedback": {{
+                "target_agent": "ExtractionAgent",
+                "should_retry": <true/false>,
+                "priority": "high|medium|low",
+                "issues": [
+                  "Specific extraction-related issues identified"
+                ],
+                "retry_recommendations": [
+                  "Specific actions for ExtractionAgent to improve"
+                ],
+                "extraction_improvements": [
+                  "Better extraction strategies or approaches"
+                ],
+                "schema_fixes": [
+                  "Specific schema compliance improvements needed"
+                ]
+              }},
+              "retry_strategy": {{
+                "recommended_approach": "research_first|extraction_first|both_parallel|give_up",
+                "success_probability": <0.0-1.0>,
+                "reasoning": "Why this approach is recommended",
+                "next_steps": [
+                  "Ordered list of recommended retry steps"
+                ]
+              }}
+            }}
+
+            Provide comprehensive targeted feedback for both agents with clear retry priorities.
+            """
+        )

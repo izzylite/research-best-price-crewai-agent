@@ -10,7 +10,7 @@ from crewai import Flow, Crew
 from crewai.flow.flow import listen, start, router
 from rich.console import Console
 
-from ..agents.navigation_agent import NavigationAgent
+from ..agents.research_agent import ResearchAgent
 from ..agents.extraction_agent import ExtractionAgent
 from ..agents.product_search_validation_agent import ProductSearchValidationAgent
 from ..schemas.product_search_result import ProductSearchResult, ProductSearchItem
@@ -41,6 +41,7 @@ class ProductSearchState(BaseModel):
     # Validation results
     validated_products: List[Dict[str, Any]] = Field(default_factory=list, description="All validated products")
     validation_feedback: Optional[Dict[str, Any]] = Field(None, description="Validation feedback for retries")
+    targeted_feedback: Optional[Dict[str, Any]] = Field(None, description="Targeted feedback for both agents")
     
     # Final results
     search_results: List[Dict[str, Any]] = Field(default_factory=list, description="Final search results")
@@ -66,7 +67,7 @@ class ProductSearchFlow(Flow[ProductSearchState]):
         self.console = Console()
         
         # Initialize agents (will be created on-demand)
-        self._navigation_agent = None
+        self._research_agent = None
         self._extraction_agent = None
         self._validation_agent = None
         
@@ -83,14 +84,14 @@ class ProductSearchFlow(Flow[ProductSearchState]):
             )
         return self._stagehand_tool
     
-    def _get_navigation_agent(self) -> NavigationAgent:
-        """Get or create NavigationAgent instance."""
-        if self._navigation_agent is None:
-            self._navigation_agent = NavigationAgent(
+    def _get_research_agent(self) -> ResearchAgent:
+        """Get or create ResearchAgent instance."""
+        if self._research_agent is None:
+            self._research_agent = ResearchAgent(
                 stagehand_tool=self._get_stagehand_tool(),
                 verbose=self.verbose
             )
-        return self._navigation_agent
+        return self._research_agent
     
     def _get_extraction_agent(self) -> ExtractionAgent:
         """Get or create ExtractionAgent instance."""
@@ -109,7 +110,55 @@ class ProductSearchFlow(Flow[ProductSearchState]):
                 verbose=self.verbose
             )
         return self._validation_agent
-    
+
+    def _generate_targeted_feedback(self, validation_data: Dict[str, Any]):
+        """Generate targeted feedback for both ResearchAgent and ExtractionAgent."""
+        try:
+            current_retailer = self.state.researched_retailers[self.state.current_retailer_index]
+            retailer_name = current_retailer.get('name', 'Unknown')
+
+            # Create targeted feedback task
+            feedback_task = self._get_validation_agent().create_targeted_feedback_task(
+                search_query=self.state.product_query,
+                validation_failures=validation_data.get('validation_failures', []),
+                retailer=retailer_name,
+                attempt_number=self.state.current_attempt,
+                max_attempts=self.state.max_retries,
+                session_id=self.state.session_id
+            )
+
+            # Create and execute feedback crew
+            feedback_crew = Crew(
+                agents=[self._get_validation_agent().get_agent()],
+                tasks=[feedback_task],
+                verbose=self.verbose
+            )
+
+            result = feedback_crew.kickoff()
+
+            # Parse targeted feedback results
+            if hasattr(result, 'raw') and result.raw:
+                feedback_data = json.loads(result.raw)
+            else:
+                feedback_data = json.loads(str(result))
+
+            # Store targeted feedback
+            self.state.targeted_feedback = feedback_data
+
+            if self.verbose:
+                research_priority = feedback_data.get('research_feedback', {}).get('priority', 'low')
+                extraction_priority = feedback_data.get('extraction_feedback', {}).get('priority', 'low')
+                self.console.print(f"[yellow]📋 Generated Targeted Feedback - Research: {research_priority}, Extraction: {extraction_priority}[/yellow]")
+
+        except Exception as e:
+            logger.error(f"Failed to generate targeted feedback: {str(e)}", exc_info=True)
+            # Fallback to basic feedback
+            self.state.targeted_feedback = {
+                "research_feedback": {"should_retry": True, "priority": "medium"},
+                "extraction_feedback": {"should_retry": True, "priority": "medium"},
+                "retry_strategy": {"recommended_approach": "extraction_first"}
+            }
+
     @start()
     def initialize_search(self) -> Dict[str, Any]:
         """Initialize the product search with input parameters."""
@@ -139,15 +188,15 @@ class ProductSearchFlow(Flow[ProductSearchState]):
                 self.console.print(f"[blue]🔬 Researching Retailers[/blue]")
             
             # Create retailer research task
-            research_task = self._get_navigation_agent().create_retailer_research_task(
+            research_task = self._get_research_agent().create_retailer_research_task(
                 product_query=self.state.product_query,
                 max_retailers=self.state.max_retailers,
                 session_id=self.state.session_id
             )
-            
+
             # Create and execute research crew
             research_crew = Crew(
-                agents=[self._get_navigation_agent().get_agent()],
+                agents=[self._get_research_agent().get_agent()],
                 tasks=[research_task],
                 verbose=self.verbose
             )
@@ -282,12 +331,19 @@ class ProductSearchFlow(Flow[ProductSearchState]):
             # Store validated products
             validated_products = validation_data.get('validated_products', [])
             self.state.validated_products.extend(validated_products)
-            
+
             validation_passed = validation_data.get('validation_passed', False)
-            
+
+            # Store validation feedback for potential retries
+            self.state.validation_feedback = validation_data.get('feedback', {})
+
+            # If validation failed, generate targeted feedback for both agents
+            if not validation_passed and self.state.current_attempt < self.state.max_retries:
+                self._generate_targeted_feedback(validation_data)
+
             if self.verbose:
                 self.console.print(f"[green]✅ Validated {len(validated_products)} products[/green]")
-            
+
             return {"action": "route_after_validation", "validation_passed": validation_passed}
             
         except Exception as e:
@@ -317,21 +373,100 @@ class ProductSearchFlow(Flow[ProductSearchState]):
                 else:
                     return "extract_products"
             
-            # If validation failed and we haven't reached max retries, retry with feedback
+            # If validation failed and we haven't reached max retries, determine retry strategy
             else:
                 self.state.current_attempt += 1
-                return "retry_with_feedback"
+
+                # Use targeted feedback to determine which agent should retry
+                if self.state.targeted_feedback:
+                    retry_strategy = self.state.targeted_feedback.get('retry_strategy', {})
+                    recommended_approach = retry_strategy.get('recommended_approach', 'extraction_first')
+
+                    research_feedback = self.state.targeted_feedback.get('research_feedback', {})
+                    extraction_feedback = self.state.targeted_feedback.get('extraction_feedback', {})
+
+                    research_should_retry = research_feedback.get('should_retry', False)
+                    extraction_should_retry = extraction_feedback.get('should_retry', False)
+
+                    if self.verbose:
+                        self.console.print(f"[cyan]🎯 Retry Strategy: {recommended_approach}[/cyan]")
+
+                    # Route based on targeted feedback
+                    if recommended_approach == "research_first" and research_should_retry:
+                        return "retry_research_with_feedback"
+                    elif recommended_approach == "extraction_first" and extraction_should_retry:
+                        return "retry_extraction_with_feedback"
+                    elif recommended_approach == "both_parallel":
+                        # For now, do research first then extraction
+                        return "retry_research_with_feedback"
+                    else:
+                        # Default to extraction retry
+                        return "retry_extraction_with_feedback"
+                else:
+                    # Fallback to extraction retry if no targeted feedback
+                    return "retry_extraction_with_feedback"
                 
         except Exception as e:
             logger.error(f"Routing error: {str(e)}", exc_info=True)
             return "finalize"
 
     @listen(route_after_validation)
-    def retry_with_feedback(self, _route_result: Dict[str, Any]) -> Dict[str, Any]:
-        """Retry extraction using validation feedback to improve results."""
+    def retry_research_with_feedback(self, _route_result: Dict[str, Any]) -> Dict[str, Any]:
+        """Retry research using targeted validation feedback to improve retailer discovery."""
         try:
             if self.verbose:
-                self.console.print(f"[yellow]🔄 Retry with Feedback (Attempt {self.state.current_attempt})[/yellow]")
+                self.console.print(f"[blue]🔬 Retry Research with Feedback (Attempt {self.state.current_attempt})[/blue]")
+
+            # Create feedback-enhanced research task
+            research_task = self._get_research_agent().create_feedback_enhanced_research_task(
+                product_query=self.state.product_query,
+                validation_feedback=self.state.targeted_feedback,
+                attempt_number=self.state.current_attempt,
+                max_retailers=self.state.max_retailers,
+                session_id=self.state.session_id
+            )
+
+            # Create and execute research crew
+            research_crew = Crew(
+                agents=[self._get_research_agent().get_agent()],
+                tasks=[research_task],
+                verbose=self.verbose
+            )
+
+            result = research_crew.kickoff()
+
+            # Parse research results
+            if hasattr(result, 'raw') and result.raw:
+                research_data = json.loads(result.raw)
+            else:
+                research_data = json.loads(str(result))
+
+            # Update researched retailers with improved results
+            improved_retailers = research_data.get('retailers', [])
+            if improved_retailers:
+                # Replace current retailer with improved research
+                self.state.researched_retailers[self.state.current_retailer_index] = improved_retailers[0]
+                # Add any additional retailers found
+                if len(improved_retailers) > 1:
+                    self.state.researched_retailers.extend(improved_retailers[1:])
+
+            if self.verbose:
+                retailer_count = len(improved_retailers)
+                self.console.print(f"[green]✅ Improved Research: {retailer_count} better retailers found[/green]")
+
+            return {"action": "extract_products", "research_improved": True}
+
+        except Exception as e:
+            error_msg = f"Research retry with feedback failed: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            return {"action": "error", "error": error_msg}
+
+    @listen(route_after_validation)
+    def retry_extraction_with_feedback(self, _route_result: Dict[str, Any]) -> Dict[str, Any]:
+        """Retry extraction using targeted validation feedback to improve results."""
+        try:
+            if self.verbose:
+                self.console.print(f"[yellow]🔄 Retry Extraction with Feedback (Attempt {self.state.current_attempt})[/yellow]")
 
             current_retailer = self.state.researched_retailers[self.state.current_retailer_index]
             retailer_name = current_retailer.get('name', 'Unknown')
@@ -345,12 +480,15 @@ class ProductSearchFlow(Flow[ProductSearchState]):
                 else:
                     retailer_url = "https://google.com"
 
+            # Use targeted feedback for extraction improvements
+            extraction_feedback = self.state.targeted_feedback.get('extraction_feedback', {}) if self.state.targeted_feedback else {}
+
             # Create feedback-enhanced extraction task
             extraction_task = self._get_extraction_agent().create_feedback_enhanced_extraction_task(
                 product_query=self.state.product_query,
                 retailer=retailer_name,
                 retailer_url=retailer_url,
-                validation_feedback=self.state.validation_feedback,
+                validation_feedback=extraction_feedback,
                 attempt_number=self.state.current_attempt,
                 session_id=self.state.session_id
             )
@@ -385,18 +523,36 @@ class ProductSearchFlow(Flow[ProductSearchState]):
             logger.error(error_msg, exc_info=True)
             return {"action": "error", "error": error_msg}
 
-    @listen(retry_with_feedback)
-    def validate_retry_products(self, retry_result: Dict[str, Any]) -> Dict[str, Any]:
+    @listen(retry_research_with_feedback)
+    def route_after_research_retry(self, retry_result: Dict[str, Any]) -> Dict[str, Any]:
+        """Route after research retry - proceed to extraction with improved retailers."""
+        if retry_result.get("action") == "error":
+            return {"action": "error", "error": retry_result.get("error")}
+
+        # After research retry, proceed to extraction with improved retailers
+        return {"action": "extract_products", "research_improved": True}
+
+    @router(route_after_research_retry)
+    def route_research_retry_to_extraction(self, research_retry_result: Dict[str, Any]) -> str:
+        """Route research retry result to extraction."""
+        if research_retry_result.get("action") == "error":
+            return "finalize"
+
+        # Proceed to extraction with improved research
+        return "extract_products"
+
+    @listen(retry_extraction_with_feedback)
+    def validate_extraction_retry_products(self, retry_result: Dict[str, Any]) -> Dict[str, Any]:
         """Validate products from feedback-enhanced retry extraction."""
         # This uses the same validation logic as the original validate_products method
         return self.validate_products(retry_result)
 
-    @router(validate_retry_products)
-    def route_after_retry_validation(self, retry_validation_result: Dict[str, Any]) -> str:
-        """Route after retry validation - same logic as original routing."""
+    @router(validate_extraction_retry_products)
+    def route_after_extraction_retry_validation(self, retry_validation_result: Dict[str, Any]) -> str:
+        """Route after extraction retry validation - same logic as original routing."""
         return self.route_after_validation(retry_validation_result)
 
-    @listen(route_after_retry_validation)
+    @listen(route_after_extraction_retry_validation)
     def finalize(self, _route_result: Dict[str, Any]) -> Dict[str, Any]:
         """Finalize the product search and prepare results."""
         try:

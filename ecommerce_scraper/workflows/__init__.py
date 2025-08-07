@@ -2,7 +2,4 @@
 
 from .product_search_flow import ProductSearchFlow, ProductSearchState
 
-__all__ = [
-    "ProductSearchFlow",
-    "ProductSearchState"
-]
+__all__ = ["ProductSearchFlow", "ProductSearchState"]
