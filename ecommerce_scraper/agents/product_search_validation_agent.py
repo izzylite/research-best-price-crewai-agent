@@ -7,6 +7,7 @@ from crewai import Agent, LLM, Task
 from pydantic import BaseModel
 from ..config.settings import settings
 from ..schemas.product_search_extraction import ProductSearchExtraction
+from ..tools.agent_capabilities_reference_tool import AgentCapabilitiesReferenceTool
 
 logger = logging.getLogger(__name__)
 
@@ -25,12 +26,18 @@ class ProductSearchValidationAgent:
 
     def __init__(self, stagehand_tool=None, verbose: bool = True, tools: List = None, llm: Optional[LLM] = None):
         """Initialize the product search validation agent."""
+        # Create agent capabilities reference tool
+        capabilities_tool = AgentCapabilitiesReferenceTool()
+
         # Handle both old (tools, llm) and new (stagehand_tool, verbose) calling patterns
         if stagehand_tool is not None:
-            # New Flow-based calling pattern
-            tools = [stagehand_tool] if stagehand_tool else []
+            # New Flow-based calling pattern - add capabilities tool
+            tools = [stagehand_tool, capabilities_tool] if stagehand_tool else [capabilities_tool]
         elif tools is None:
-            tools = []
+            tools = [capabilities_tool]
+        else:
+            # Add capabilities tool to existing tools
+            tools.append(capabilities_tool)
 
         agent_config = {
             "role": "Product Search Validation and Quality Assurance Specialist",
@@ -61,9 +68,14 @@ class ProductSearchValidationAgent:
             
             FEEDBACK LOOP PROCESS:
             - When validation fails, provide specific feedback for retry attempts
+            - Use agent capabilities reference tool to understand what each agent can address
+            - Generate targeted feedback based on agent capabilities and limitations
             - Suggest alternative retailers or search strategies
             - Limit retry attempts to maximum 3 per product search
             - Track validation success rates and improvement over retries
+
+            TOOLS AVAILABLE:
+            - agent_capabilities_reference_tool: Get detailed information about ResearchAgent and ExtractionAgent capabilities for targeted feedback generation
             """,
             "verbose": verbose,
             "allow_delegation": False,
@@ -345,36 +357,48 @@ class ProductSearchValidationAgent:
         Session ID: {session_id}
         Validation Failures: {len(validation_failures)}
 
-        TARGETED FEEDBACK ANALYSIS:
+        STEP 1: GET AGENT CAPABILITIES INFORMATION
+        First, use the agent_capabilities_reference_tool to understand what each agent can do:
+
+        Tool: agent_capabilities_reference_tool
+        Action Input: {{"agent_name": "both", "capability_type": "all"}}
+
+        This will provide detailed information about:
+        - ResearchAgent capabilities, tools, and feedback types it can act upon
+        - ExtractionAgent capabilities, tools, and feedback types it can act upon
+        - Guidelines for routing feedback to the appropriate agent
+
+        STEP 2: TARGETED FEEDBACK ANALYSIS
+        Based on the agent capabilities information:
         1. **Categorize validation failures by root cause**
-        2. **Identify research-related issues vs extraction-related issues**
-        3. **Generate specific feedback for ResearchAgent**
-        4. **Generate specific feedback for ExtractionAgent**
-        5. **Determine which agent should retry first**
+        2. **Map failures to agent capabilities** (what each agent can actually address)
+        3. **Generate specific, actionable feedback for ResearchAgent**
+        4. **Generate specific, actionable feedback for ExtractionAgent**
+        5. **Determine which agent should retry first based on capabilities**
 
-        RESEARCH-RELATED ISSUES (for ResearchAgent):
-        - Wrong or illegitimate retailers discovered
-        - Invalid or inaccessible product URLs
-        - Retailers that don't actually sell the product
-        - Price comparison sites instead of direct retailers
-        - Search query too broad or narrow for effective research
+        STEP 3: CAPABILITY-BASED FEEDBACK GENERATION
+        Using the agent capabilities information, generate feedback that each agent can actually act upon:
 
-        EXTRACTION-RELATED ISSUES (for ExtractionAgent):
-        - Missing or incomplete product data
-        - Incorrect price formatting or currency
-        - Poor quality or missing product images
-        - Inaccurate product names or descriptions
-        - Schema compliance issues
+        FOR RESEARCHAGENT:
+        - Only suggest feedback types listed in its "feedback_types_actionable"
+        - Focus on issues it can address with its perplexity_retailer_research_tool
+        - Provide search_instructions that utilize its feedback_response_capabilities
+        - Consider its limitations when making recommendations
 
-        FEEDBACK PRIORITIZATION:
-        - If >50% of issues are research-related: Prioritize ResearchAgent retry
-        - If >50% of issues are extraction-related: Prioritize ExtractionAgent retry
-        - If mixed issues: Suggest ResearchAgent retry first, then ExtractionAgent
+        FOR EXTRACTIONAGENT:
+        - Only suggest feedback types listed in its "feedback_types_actionable"
+        - Focus on issues it can address with its simplified_stagehand_tool
+        - Provide extraction improvements that utilize its feedback_response_capabilities
+        - Consider its limitations when making recommendations
 
-        RETRY STRATEGY RECOMMENDATIONS:
-        - Assess likelihood of success for each agent retry
-        - Suggest specific improvements for each agent
-        - Recommend alternative approaches if standard retry unlikely to succeed
+        STEP 4: INTELLIGENT FEEDBACK ROUTING
+        Use the feedback_routing_guidelines from the capabilities tool to determine:
+        - Which agent should retry first based on failure patterns
+        - What priority level to assign to each agent's feedback
+        - Whether both agents need to retry or just one
+        - Success probability assessment based on agent capabilities
+
+        CRITICAL: Only generate feedback that agents can actually implement based on their documented capabilities and tools.
         """
 
         return Task(

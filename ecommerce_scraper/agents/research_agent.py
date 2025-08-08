@@ -191,10 +191,21 @@ class ResearchAgent:
         - perplexity_retailer_research_tool: Use this with enhanced search_instructions parameter
 
         **TOOL USAGE WITH FEEDBACK:**
-        Call the perplexity_retailer_research_tool with these parameters:
+        Build enhanced search instructions from the feedback and call the tool:
+
+        Enhanced Search Instructions Template:
+        "Find UK retailers that sell {product_query}.
+        {recommendations_text}
+        {alternatives_text}
+        {refinements_text}
+        {issues_text}
+
+        Ensure all retailers are legitimate UK-based stores with direct product URLs and verified pricing."
+
+        Call perplexity_retailer_research_tool with:
         - product_query: "{product_query}"
         - max_retailers: {max_retailers}
-        - search_instructions: "Find UK retailers that sell {product_query}. {' '.join(retry_recommendations) if retry_recommendations else 'Focus on major UK retailers.'} {' Prioritize: ' + ', '.join(alternative_retailers) if alternative_retailers else ''} {' Search terms: ' + ', '.join(search_refinements) if search_refinements else ''} {' Avoid: ' + ', '.join(issues) if issues else ''}"
+        - search_instructions: [the enhanced instructions built from feedback above]
 
         IMPORTANT: Use the search_instructions parameter to pass all feedback recommendations to the tool for enhanced search quality.
         """
