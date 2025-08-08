@@ -4,18 +4,23 @@ import json
 import logging
 from typing import Dict, Any, List, Optional
 from crewai import Agent, LLM, Task
-from pydantic import BaseModel
+from ..config.settings import settings
+from pydantic import BaseModel, Field
 from ..config.settings import settings
 from ..schemas.product_search_extraction import ProductSearchExtraction
 from ..tools.agent_capabilities_reference_tool import AgentCapabilitiesReferenceTool
+from ..schemas.agent_outputs import TargetedFeedbackResult
 
 logger = logging.getLogger(__name__)
 
 
 class ProductSearchValidationResult(BaseModel):
-    """Pydantic model for product search validation task output."""
-    validation_passed: bool
-    validated_products: List[Dict[str, Any]]
+    """Pydantic model for product search validation task output.
+
+    Be tolerant to partial outputs by providing defaults for required fields.
+    """
+    validation_passed: bool = False
+    validated_products: List[Dict[str, Any]] = Field(default_factory=list)
     validation_feedback: Optional[Dict[str, Any]] = None
     retry_recommendations: Optional[List[str]] = None
     processing_complete: bool = True
@@ -87,6 +92,15 @@ class ProductSearchValidationAgent:
         if llm:
             agent_config["llm"] = llm
 
+        # If no LLM provided, align with configured model
+        if llm is None and settings.openai_api_key:
+            try:
+                from crewai import LLM as CrewLLM
+                model_name = settings.agent_model_name
+                agent_config["llm"] = CrewLLM(model=model_name)
+            except Exception:
+                pass
+
         self.agent = Agent(**agent_config)
 
     def get_agent(self) -> Agent:
@@ -97,6 +111,7 @@ class ProductSearchValidationAgent:
                                             search_query: str,
                                             extracted_products: List[Dict[str, Any]],
                                             retailer: str,
+                                            retailer_url: str,
                                             attempt_number: int = 1,
                                             max_attempts: int = 3,
                                             session_id: str = None):
@@ -107,8 +122,9 @@ class ProductSearchValidationAgent:
 
         Search Query: {search_query}
         Retailer: {retailer}
+        Target URL: {retailer_url}
         Attempt Number: {attempt_number} of {max_attempts}
-        Session ID: {session_id}
+        Session ID: {session_id} 
         Products to Validate: {len(extracted_products)}
 
         VALIDATION WORKFLOW:
@@ -168,7 +184,7 @@ class ProductSearchValidationAgent:
                 {{
                   "product_name": "Validated product name",
                   "price": "£XX.XX",
-                  "url": "validated product URL",
+                  "url": "{retailer_url}",
                   "retailer": "{retailer}",
                   "validation_score": <0.0-1.0>,
                   "validation_notes": "Why this product passed validation"
@@ -217,7 +233,8 @@ class ProductSearchValidationAgent:
             
             Provide detailed validation results with specific feedback for retry attempts.
             Only include products that pass all validation criteria in validated_products.
-            """
+            """,
+            output_pydantic=ProductSearchValidationResult
         )
 
     def create_feedback_generation_task(self,
@@ -289,7 +306,8 @@ class ProductSearchValidationAgent:
             }}
             
             Provide actionable feedback for improving validation success on retry attempts.
-            """
+            """,
+            output_pydantic=TargetedFeedbackResult
         )
 
     def validate_product_match(self, product_name: str, search_query: str) -> float:
@@ -321,7 +339,7 @@ class ProductSearchValidationAgent:
             'asda.com', 'tesco.com', 'waitrose.com', 'sainsburys.co.uk',
             'amazon.co.uk', 'ebay.co.uk', 'argos.co.uk', 'currys.co.uk',
             'johnlewis.com', 'next.co.uk', 'marksandspencer.com',
-            'boots.com', 'superdrug.com', 'wilko.com', 'b&q.co.uk'
+            'boots.com', 'superdrug.com', 'wilko.com', 'diy.com'  # B&Q
         ]
         
         # Price comparison sites to exclude

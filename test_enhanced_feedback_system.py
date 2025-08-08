@@ -22,16 +22,22 @@ def test_basic_research():
     print("=" * 50)
     
     tool = PerplexityRetailerResearchTool()
-    
-    # Test basic research
-    result = tool._run(
-        product_query="iPhone 15 Pro",
-        max_retailers=3
-    )
-    
-    print("Basic Research Result:")
-    print(result)
-    print("\n")
+    has_api_key = bool(os.getenv("PERPLEXITY_API_KEY"))
+
+    if has_api_key:
+        result = tool._run(
+            product_query="iPhone 15 Pro",
+            max_retailers=3
+        )
+        print("Basic Research Result:")
+        print(result)
+        print("\n")
+    else:
+        try:
+            tool._run(product_query="iPhone 15 Pro", max_retailers=3)
+            assert False, "Expected error without PERPLEXITY_API_KEY"
+        except Exception as e:
+            assert "Perplexity API is required" in str(e)
 
 
 def test_feedback_enhanced_research():
@@ -40,7 +46,8 @@ def test_feedback_enhanced_research():
     print("=" * 50)
     
     tool = PerplexityRetailerResearchTool()
-    
+    has_api_key = bool(os.getenv("PERPLEXITY_API_KEY"))
+
     # Simulate validation feedback that would come from the ValidationAgent
     feedback_instructions = """Find UK retailers that sell iPhone 15 Pro with the following requirements:
 - Focus on major UK electronics retailers like Currys, John Lewis, Amazon UK
@@ -50,15 +57,21 @@ def test_feedback_enhanced_research():
 - Ensure retailers actually have the product in stock, not just listings"""
     
     # Test feedback-enhanced research
-    result = tool._run(
-        product_query="iPhone 15 Pro",
-        max_retailers=3,
-        search_instructions=feedback_instructions
-    )
-    
-    print("Feedback-Enhanced Research Result:")
-    print(result)
-    print("\n")
+    if has_api_key:
+        result = tool._run(
+            product_query="iPhone 15 Pro",
+            max_retailers=3,
+            search_instructions=feedback_instructions
+        )
+        print("Feedback-Enhanced Research Result:")
+        print(result)
+        print("\n")
+    else:
+        try:
+            tool._run(product_query="iPhone 15 Pro", max_retailers=3, search_instructions=feedback_instructions)
+            assert False, "Expected error without PERPLEXITY_API_KEY"
+        except Exception as e:
+            assert "Perplexity API is required" in str(e)
 
 
 def test_validation_feedback_simulation():
@@ -113,15 +126,22 @@ Ensure all retailers are legitimate UK-based stores with direct product URLs."""
     
     # Use the enhanced instructions with the tool
     tool = PerplexityRetailerResearchTool()
-    result = tool._run(
-        product_query="iPhone 15 Pro",
-        max_retailers=5,
-        search_instructions=enhanced_instructions
-    )
-    
-    print("Result with Validation Feedback Applied:")
-    print(result)
-    print("\n")
+    has_api_key = bool(os.getenv("PERPLEXITY_API_KEY"))
+    if has_api_key:
+        result = tool._run(
+            product_query="iPhone 15 Pro",
+            max_retailers=5,
+            search_instructions=enhanced_instructions
+        )
+        print("Result with Validation Feedback Applied:")
+        print(result)
+        print("\n")
+    else:
+        try:
+            tool._run(product_query="iPhone 15 Pro", max_retailers=5, search_instructions=enhanced_instructions)
+            assert False, "Expected error without PERPLEXITY_API_KEY"
+        except Exception as e:
+            assert "Perplexity API is required" in str(e)
 
 
 def main():

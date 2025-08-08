@@ -19,6 +19,7 @@ from crewai.tools import BaseTool
 from pydantic import BaseModel, Field
 
 from .custom_logger import setup_logger
+from ..config.settings import settings
 
 class SimplifiedStagehandInput(BaseModel):
     """Input schema for SimplifiedStagehandTool."""
@@ -223,12 +224,17 @@ class SimplifiedStagehandTool(BaseTool):
 
                 self.logger.info("Initializing Stagehand v0.5.0 session...")
 
-                # Get credentials from environment
+                # Get credentials and model selection from settings/env
                 import os
 
                 api_key = os.getenv('BROWSERBASE_API_KEY')
                 project_id = os.getenv('BROWSERBASE_PROJECT_ID')
-                model_api_key = os.getenv('OPENAI_API_KEY')
+                # Resolve model API key based on configured model name
+                try:
+                    model_api_key = settings.get_api_key_for_model(settings.stagehand_model_name)
+                except Exception:
+                    # Fallback to OPENAI_API_KEY for backwards compatibility
+                    model_api_key = os.getenv('OPENAI_API_KEY')
 
                 if not api_key or not project_id:
                     raise Exception("Browserbase API key and project ID are required. Set BROWSERBASE_API_KEY and BROWSERBASE_PROJECT_ID environment variables.")
@@ -240,12 +246,27 @@ class SimplifiedStagehandTool(BaseTool):
                 # Based on official Python documentation (uses snake_case)
                 from stagehand import StagehandConfig
 
+                # Determine provider-prefixed model name
+                configured_model = settings.stagehand_model_name or "gpt-4o"
+                cm_lower = configured_model.lower()
+                if "/" not in configured_model:
+                    if "gpt" in cm_lower:
+                        model_name = f"openai/{configured_model}"
+                    elif "claude" in cm_lower:
+                        model_name = f"anthropic/{configured_model}"
+                    elif "gemini" in cm_lower or "google" in cm_lower:
+                        model_name = f"google/{configured_model}"
+                    else:
+                        model_name = f"openai/{configured_model}"
+                else:
+                    model_name = configured_model
+
                 stagehand_config = StagehandConfig(
                     env="BROWSERBASE",
                     api_key=api_key,  # Python API uses snake_case
                     project_id=project_id,  # Python API uses snake_case
-                    model_name="openai/gpt-4o",  # Python API format
-                    verbose=1,
+                    model_name=model_name,  # e.g., openai/gpt-5
+                    verbose=settings.stagehand_verbose,
                 )
 
                 # CRITICAL FIX: Add session_id for session reuse if provided
@@ -394,7 +415,7 @@ class SimplifiedStagehandTool(BaseTool):
         """
         try:
             from typing import List, Optional
-            from pydantic import create_model, HttpUrl
+            from pydantic import create_model
 
             # Handle different schema formats
             if 'fields' in schema_def:
@@ -409,29 +430,22 @@ class SimplifiedStagehandTool(BaseTool):
                     is_url_field = any(keyword in field_name.lower() for keyword in ['url', 'link', 'image', 'href'])
 
                     if field_type == 'str':
-                        if is_url_field:
-                            pydantic_fields[field_name] = (HttpUrl, ...)
-                        else:
-                            pydantic_fields[field_name] = (str, ...)
+                        # Keep URLs lenient as strings to avoid strict validation failures
+                        pydantic_fields[field_name] = (str, ...)
                     elif field_type == 'optional_str':
-                        if is_url_field:
-                            pydantic_fields[field_name] = (Optional[HttpUrl], None)
-                        else:
-                            pydantic_fields[field_name] = (Optional[str], None)
+                        pydantic_fields[field_name] = (Optional[str], None)
                     elif field_type == 'url':
-                        pydantic_fields[field_name] = (HttpUrl, ...)
+                        # Use str for URL to be tolerant of relative/malformed links
+                        pydantic_fields[field_name] = (str, ...)
                     elif field_type == 'optional_url':
-                        pydantic_fields[field_name] = (Optional[HttpUrl], None)
+                        pydantic_fields[field_name] = (Optional[str], None)
                     elif field_type == 'int':
                         pydantic_fields[field_name] = (int, ...)
                     elif field_type == 'float':
                         pydantic_fields[field_name] = (float, ...)
                     else:
-                        # Default to string (but check for URL field names)
-                        if is_url_field:
-                            pydantic_fields[field_name] = (Optional[HttpUrl], None)
-                        else:
-                            pydantic_fields[field_name] = (str, ...)
+                        # Default to optional string for unknown types; be lenient for URLs
+                        pydantic_fields[field_name] = (Optional[str], None)
 
                 # Create the model
                 ItemModel = create_model(model_name, **pydantic_fields)
@@ -456,15 +470,15 @@ class SimplifiedStagehandTool(BaseTool):
             return self._create_default_schema()
 
     def _create_default_schema(self) -> type[BaseModel]:
-        """Create the default product extraction schema with proper URL types."""
+        """Create a lenient default product extraction schema (URLs as strings)."""
         from typing import List, Optional
-        from pydantic import BaseModel, HttpUrl
+        from pydantic import BaseModel
 
         class Product(BaseModel):
             name: str
             price: str
-            url: Optional[HttpUrl] = None
-            image: Optional[HttpUrl] = None
+            url: Optional[str] = None
+            image: Optional[str] = None
             description: Optional[str] = None
 
         class ProductList(BaseModel):
@@ -608,8 +622,12 @@ class SimplifiedStagehandTool(BaseTool):
             # Direct API call following official pattern (Python naming convention)
             await stagehand.page.goto(url, wait_until="domcontentloaded")
             
-            # Return session info following official pattern
-            session_id = getattr(stagehand, 'browserbaseSessionID', 'unknown')
+            # Return session info following official pattern (prefer snake_case)
+            session_id = (
+                getattr(stagehand, 'browserbase_session_id', None)
+                or getattr(stagehand, 'session_id', None)
+                or getattr(stagehand, 'browserbaseSessionID', 'unknown')
+            )
             result = f"Navigated to: {url}\nSession: {session_id}"
             
             self.logger.info(f"Successfully navigated to {url}")

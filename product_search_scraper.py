@@ -41,12 +41,20 @@ _scraper_instance = None
 console = Console()
 logger = logging.getLogger(__name__)
 
-# Try to import keyboard for ESC key detection
+# Try to import keyboard for ESC key detection; fallback to msvcrt on Windows
 try:
-    import keyboard
+    import keyboard  # type: ignore
     KEYBOARD_AVAILABLE = True
-except ImportError:
+except Exception:
     KEYBOARD_AVAILABLE = False
+
+MSVCRT_AVAILABLE = False
+if os.name == "nt":
+    try:
+        import msvcrt  # type: ignore
+        MSVCRT_AVAILABLE = True
+    except Exception:
+        MSVCRT_AVAILABLE = False
 
 
 def signal_handler(signum, frame):
@@ -71,26 +79,35 @@ def check_termination() -> bool:
 
 
 def esc_key_listener():
-    """Listen for ESC key press in a separate thread."""
+    """Listen for ESC key press in a separate thread (keyboard or msvcrt)."""
     global _termination_requested
-    if not KEYBOARD_AVAILABLE:
-        return
-
     try:
-        while not _termination_requested:
-            if keyboard.is_pressed('esc'):
-                console.print("\n🛑 [red]ESC key detected - requesting termination...[/red]")
-                _termination_requested = True
-                break
-            time.sleep(0.1)  # Small delay to prevent high CPU usage
+        if KEYBOARD_AVAILABLE:
+            # Poll keyboard lib
+            while not _termination_requested:
+                if keyboard.is_pressed('esc'):
+                    console.print("\n🛑 [red]ESC key detected - requesting termination...[/red]")
+                    _termination_requested = True
+                    break
+                time.sleep(0.1)  # Small delay to prevent high CPU usage
+        elif MSVCRT_AVAILABLE:
+            # Use msvcrt on Windows to detect ESC without extra deps
+            while not _termination_requested:
+                if msvcrt.kbhit():  # type: ignore
+                    ch = msvcrt.getch()  # type: ignore
+                    if ch in (b"\x1b",):  # ESC
+                        console.print("\n🛑 [red]ESC key detected - requesting termination...[/red]")
+                        _termination_requested = True
+                        break
+                time.sleep(0.05)
     except Exception:
         # Silently handle any keyboard detection errors
         pass
 
 
 def start_esc_listener():
-    """Start ESC key listener in a daemon thread."""
-    if KEYBOARD_AVAILABLE:
+    """Start ESC key listener in a daemon thread if supported."""
+    if KEYBOARD_AVAILABLE or MSVCRT_AVAILABLE:
         listener_thread = threading.Thread(target=esc_key_listener, daemon=True)
         listener_thread.start()
         return listener_thread
@@ -283,6 +300,9 @@ class ProductSearchScraper:
             
             # Save results
             saved_path = self._save_results(result_dict)
+            if saved_path:
+                # Record saved file path in metadata for display and downstream usage
+                result_dict.setdefault("metadata", {})["results_file"] = saved_path
             
             # Create ProductSearchResult object
             search_result = ProductSearchResult.from_dict(result_dict)

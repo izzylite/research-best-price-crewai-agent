@@ -52,32 +52,34 @@ def test_retailer_research_tool():
     """Test the Perplexity retailer research tool."""
     print("🧪 Testing Retailer Research Tool...")
     
-    try:
-        from ecommerce_scraper.tools.perplexity_retailer_research_tool import PerplexityRetailerResearchTool
-        
-        # Create tool instance
-        tool = PerplexityRetailerResearchTool()
-        
-        # Test with a simple product query (will use fallback if no API key)
-        result = tool._run(
-            product_query="iPhone 15 Pro",
-            max_retailers=3
-        )
-        
-        # Parse result
-        result_data = json.loads(result)
-        
-        # Validate result structure
-        assert "product_query" in result_data
-        assert "retailers" in result_data
-        assert isinstance(result_data["retailers"], list)
-        
-        print(f"✅ Retailer research tool passed - found {len(result_data['retailers'])} retailers")
-        return True
-        
-    except Exception as e:
-        print(f"❌ Retailer research tool failed: {e}")
-        return False
+    from ecommerce_scraper.tools.perplexity_retailer_research_tool import PerplexityRetailerResearchTool
+    
+    tool = PerplexityRetailerResearchTool()
+    has_api_key = bool(os.getenv("PERPLEXITY_API_KEY"))
+    
+    if has_api_key:
+        try:
+            result = tool._run(product_query="iPhone 15 Pro", max_retailers=3)
+            result_data = json.loads(result)
+            assert "product_query" in result_data
+            assert "retailers" in result_data
+            assert isinstance(result_data["retailers"], list)
+            print(f"✅ Retailer research tool passed - found {len(result_data['retailers'])} retailers")
+            return True
+        except Exception as e:
+            print(f"❌ Retailer research tool failed with API key: {e}")
+            return False
+    else:
+        try:
+            tool._run(product_query="iPhone 15 Pro", max_retailers=3)
+            print("❌ Expected exception without PERPLEXITY_API_KEY but got result")
+            return False
+        except Exception as e:
+            if "Perplexity API is required" in str(e):
+                print("✅ Properly raised error when PERPLEXITY_API_KEY is missing")
+                return True
+            print(f"❌ Unexpected error without API key: {e}")
+            return False
 
 
 def test_validation_agent():

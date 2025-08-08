@@ -226,48 +226,48 @@ def handle_common_popups(stagehand_tool, vendor: str = None) -> List[str]:
         
         # Handle cookie consent (highest priority)
         result = stagehand_tool._run(
-            instruction=PopupHandler.create_popup_dismissal_command("cookie"),
-            command_type="act"
+            operation="act",
+            action=PopupHandler.create_popup_dismissal_command("cookie")
         )
         if "completed" in result.lower():
             actions_taken.append("Dismissed cookie consent")
         
         # Handle newsletter popup
         result = stagehand_tool._run(
-            instruction=PopupHandler.create_popup_dismissal_command("newsletter"),
-            command_type="act"
+            operation="act",
+            action=PopupHandler.create_popup_dismissal_command("newsletter")
         )
         if "completed" in result.lower():
             actions_taken.append("Dismissed newsletter popup")
         
         # Handle age verification
         result = stagehand_tool._run(
-            instruction=PopupHandler.create_popup_dismissal_command("age"),
-            command_type="act"
+            operation="act",
+            action=PopupHandler.create_popup_dismissal_command("age")
         )
         if "completed" in result.lower():
             actions_taken.append("Handled age verification")
         
         # Handle location selection
         result = stagehand_tool._run(
-            instruction=PopupHandler.create_popup_dismissal_command("location"),
-            command_type="act"
+            operation="act",
+            action=PopupHandler.create_popup_dismissal_command("location")
         )
         if "completed" in result.lower():
             actions_taken.append("Selected location/country")
         
         # Handle promotional banners
         result = stagehand_tool._run(
-            instruction=PopupHandler.create_popup_dismissal_command("promotion"),
-            command_type="act"
+            operation="act",
+            action=PopupHandler.create_popup_dismissal_command("promotion")
         )
         if "completed" in result.lower():
             actions_taken.append("Dismissed promotional banner")
         
         # Verify content is accessible
         verification = stagehand_tool._run(
-            instruction=PopupHandler.get_verification_command(),
-            command_type="observe"
+            operation="observe",
+            instruction=PopupHandler.get_verification_command()
         )
 
         logger.info(f"Popup handling completed. Actions taken: {actions_taken}")

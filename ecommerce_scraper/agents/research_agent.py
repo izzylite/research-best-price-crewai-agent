@@ -3,7 +3,9 @@
 from typing import List, Optional, Dict, Any
 from crewai import Agent, LLM
 from ..config.settings import settings
+from ..config.settings import settings
 from ..tools.perplexity_retailer_research_tool import PerplexityRetailerResearchTool
+from ..schemas.agent_outputs import ResearchResult
 
 
 class ResearchAgent:
@@ -54,6 +56,15 @@ class ResearchAgent:
 
         if llm:
             agent_config["llm"] = llm
+
+        # If no LLM provided, align with configured model for consistency
+        if llm is None and settings.openai_api_key:
+            try:
+                from crewai import LLM as CrewLLM
+                model_name = settings.agent_model_name
+                agent_config["llm"] = CrewLLM(model=model_name)
+            except Exception:
+                pass
 
         self.agent = Agent(**agent_config)
 
@@ -123,7 +134,8 @@ class ResearchAgent:
             }}
 
             Provide comprehensive retailer research results with direct product URLs where possible.
-            """
+            """,
+            output_pydantic=ResearchResult
         )
 
     def create_feedback_enhanced_research_task(self,
@@ -245,5 +257,6 @@ class ResearchAgent:
             }}
 
             Show clear improvement over previous research attempt by addressing all validation feedback.
-            """
+            """,
+            output_pydantic=ResearchResult
         )

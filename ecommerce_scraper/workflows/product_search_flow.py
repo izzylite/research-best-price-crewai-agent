@@ -4,6 +4,7 @@ import json
 import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional
+import re
 from pydantic import BaseModel, Field
 
 from crewai import Flow, Crew
@@ -75,6 +76,99 @@ class ProductSearchFlow(Flow[ProductSearchState]):
         self._stagehand_tool = None
         self._shared_session_id = None
     
+    def _safe_parse_json(self, result: Any, default: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Parse CrewAI result to JSON dict safely, salvaging when needed.
+
+        Returns a dict. If parsing fails, returns provided default or empty dict.
+        """
+        if default is None:
+            default = {}
+
+        # If result already a dict, return as-is
+        if isinstance(result, dict):
+            return result
+
+        # If result is a list, wrap into a dict under a generic key
+        if isinstance(result, list):
+            return {"items": result}
+
+        candidates: List[str] = []
+
+        try:
+            if hasattr(result, "raw") and getattr(result, "raw"):
+                candidates.append(getattr(result, "raw"))
+        except Exception:
+            pass
+
+        try:
+            s = str(result) if result is not None else ""
+            if s:
+                candidates.append(s)
+        except Exception:
+            pass
+
+        def try_load(text: str) -> Optional[Dict[str, Any]]:
+            try:
+                parsed = json.loads(text)
+                if isinstance(parsed, dict):
+                    return parsed
+                if isinstance(parsed, list):
+                    return {"items": parsed}
+            except Exception:
+                pass
+
+            # Attempt to salvage JSON object
+            if "{" in text and "}" in text:
+                try:
+                    start = text.find("{")
+                    end = text.rfind("}")
+                    if start != -1 and end != -1 and end > start:
+                        salvaged = text[start : end + 1]
+                        parsed = json.loads(salvaged)
+                        if isinstance(parsed, dict):
+                            return parsed
+                        if isinstance(parsed, list):
+                            return {"items": parsed}
+                except Exception:
+                    pass
+
+            # Attempt to salvage JSON array
+            if "[" in text and "]" in text:
+                try:
+                    start = text.find("[")
+                    end = text.rfind("]")
+                    if start != -1 and end != -1 and end > start:
+                        salvaged = text[start : end + 1]
+                        parsed = json.loads(salvaged)
+                        if isinstance(parsed, dict):
+                            return parsed
+                        if isinstance(parsed, list):
+                            return {"items": parsed}
+                except Exception:
+                    pass
+
+            # Regex fallback for the largest JSON object block
+            try:
+                match = re.search(r"\{[\s\S]*\}", text)
+                if match:
+                    parsed = json.loads(match.group(0))
+                    if isinstance(parsed, dict):
+                        return parsed
+                    if isinstance(parsed, list):
+                        return {"items": parsed}
+            except Exception:
+                pass
+
+            return None
+
+        for c in candidates:
+            parsed = try_load(c)
+            if parsed is not None:
+                return parsed
+
+        logger.warning("Failed to parse JSON result; returning default")
+        return default
+
     def _get_stagehand_tool(self):
         """Get or create shared Stagehand tool instance."""
         if self._stagehand_tool is None:
@@ -136,11 +230,11 @@ class ProductSearchFlow(Flow[ProductSearchState]):
 
             result = feedback_crew.kickoff()
 
-            # Parse targeted feedback results
-            if hasattr(result, 'raw') and result.raw:
-                feedback_data = json.loads(result.raw)
+            # Prefer pydantic output; otherwise salvage JSON safely
+            if hasattr(result, 'pydantic') and getattr(result, 'pydantic') is not None:
+                feedback_data = result.pydantic.model_dump()
             else:
-                feedback_data = json.loads(str(result))
+                feedback_data = self._safe_parse_json(result, default={})
 
             # Store targeted feedback
             self.state.targeted_feedback = feedback_data
@@ -202,12 +296,13 @@ class ProductSearchFlow(Flow[ProductSearchState]):
             )
             
             result = research_crew.kickoff()
-            
-            # Parse research results
-            if hasattr(result, 'raw') and result.raw:
-                research_data = json.loads(result.raw)
+
+            # Prefer pydantic output when available
+            if hasattr(result, 'pydantic') and getattr(result, 'pydantic') is not None:
+                research_data = result.pydantic.model_dump()
             else:
-                research_data = json.loads(str(result))
+                # Parse research results safely
+                research_data = self._safe_parse_json(result, default={"retailers": []})
             
             # Store researched retailers
             self.state.researched_retailers = research_data.get('retailers', [])
@@ -265,12 +360,12 @@ class ProductSearchFlow(Flow[ProductSearchState]):
             )
             
             result = extraction_crew.kickoff()
-            
-            # Parse extraction results
-            if hasattr(result, 'raw') and result.raw:
-                extraction_data = json.loads(result.raw)
+
+            if hasattr(result, 'pydantic') and getattr(result, 'pydantic') is not None:
+                extraction_data = result.pydantic.model_dump()
             else:
-                extraction_data = json.loads(str(result))
+                # Parse extraction results safely
+                extraction_data = self._safe_parse_json(result, default={"products": []})
             
             # Store current retailer products
             self.state.current_retailer_products = extraction_data.get('products', [])
@@ -299,6 +394,7 @@ class ProductSearchFlow(Flow[ProductSearchState]):
             
             current_retailer = self.state.researched_retailers[self.state.current_retailer_index]
             retailer_name = current_retailer.get('name', 'Unknown')
+            product_url = current_retailer.get('product_url', current_retailer.get('url', 'Unknown'))
             
             if self.verbose:
                 self.console.print(f"[magenta]✅ Validating Products from {retailer_name}[/magenta]")
@@ -308,6 +404,7 @@ class ProductSearchFlow(Flow[ProductSearchState]):
                 search_query=self.state.product_query,
                 extracted_products=self.state.current_retailer_products,
                 retailer=retailer_name,
+                retailer_url=product_url,
                 attempt_number=self.state.current_attempt,
                 max_attempts=self.state.max_retries,
                 session_id=self.state.session_id
@@ -321,12 +418,12 @@ class ProductSearchFlow(Flow[ProductSearchState]):
             )
             
             result = validation_crew.kickoff()
-            
-            # Parse validation results
-            if hasattr(result, 'raw') and result.raw:
-                validation_data = json.loads(result.raw)
+
+            if hasattr(result, 'pydantic') and getattr(result, 'pydantic') is not None:
+                validation_data = result.pydantic.model_dump()
             else:
-                validation_data = json.loads(str(result))
+                # Parse validation results safely
+                validation_data = self._safe_parse_json(result, default={"validated_products": [], "validation_passed": False})
             
             # Store validated products
             validated_products = validation_data.get('validated_products', [])
@@ -359,6 +456,26 @@ class ProductSearchFlow(Flow[ProductSearchState]):
                 return "finalize"
             
             validation_passed = validation_result.get("validation_passed", False)
+
+            # If extraction produced no products, immediately move to next retailer per spec
+            if not self.state.current_retailer_products:
+                # Move to next retailer without retries
+                self.state.current_retailer_index += 1
+                self.state.current_attempt = 1
+                self.state.retailers_searched += 1
+                
+                if self.verbose:
+                    self.console.print("[yellow]⏭️ No products extracted; moving to next retailer[/yellow]")
+                
+                if self.state.current_retailer_index >= len(self.state.researched_retailers):
+                    # If we exhausted all retailers and found nothing overall, route to feedback-driven research retry
+                    if not self.state.validated_products:
+                        if self.verbose:
+                            self.console.print("[magenta]🧭 No products found from any retailer; triggering feedback-driven research retry[/magenta]")
+                        return "retry_research_with_feedback"
+                    return "finalize"
+                else:
+                    return "extract_products"
             
             # If validation passed or we've reached max retries, move to next retailer
             if validation_passed or self.state.current_attempt >= self.state.max_retries:
@@ -417,6 +534,14 @@ class ProductSearchFlow(Flow[ProductSearchState]):
             if self.verbose:
                 self.console.print(f"[blue]🔬 Retry Research with Feedback (Attempt {self.state.current_attempt})[/blue]")
 
+            # Ensure targeted feedback exists (avoid None)
+            if not self.state.targeted_feedback:
+                self.state.targeted_feedback = {
+                    "research_feedback": {},
+                    "extraction_feedback": {},
+                    "retry_strategy": {"recommended_approach": "extraction_first"},
+                }
+
             # Create feedback-enhanced research task
             research_task = self._get_research_agent().create_feedback_enhanced_research_task(
                 product_query=self.state.product_query,
@@ -435,20 +560,33 @@ class ProductSearchFlow(Flow[ProductSearchState]):
 
             result = research_crew.kickoff()
 
-            # Parse research results
-            if hasattr(result, 'raw') and result.raw:
-                research_data = json.loads(result.raw)
+            if hasattr(result, 'pydantic') and getattr(result, 'pydantic') is not None:
+                research_data = result.pydantic.model_dump()
             else:
-                research_data = json.loads(str(result))
+                # Parse research results safely
+                research_data = self._safe_parse_json(result, default={"retailers": []})
 
-            # Update researched retailers with improved results
+            # Update researched retailers with improved results (dedupe by product_url)
             improved_retailers = research_data.get('retailers', [])
             if improved_retailers:
-                # Replace current retailer with improved research
+                # Replace current retailer with the top improved candidate
                 self.state.researched_retailers[self.state.current_retailer_index] = improved_retailers[0]
-                # Add any additional retailers found
-                if len(improved_retailers) > 1:
-                    self.state.researched_retailers.extend(improved_retailers[1:])
+
+                # Build set of existing product URLs for dedupe
+                existing_urls = set()
+                for r in self.state.researched_retailers:
+                    url = (r.get('product_url') or '').strip().lower()
+                    if url:
+                        existing_urls.add(url)
+
+                # Extend with non-duplicate improved retailers
+                added = 0
+                for r in improved_retailers[1:]:
+                    url = (r.get('product_url') or '').strip().lower()
+                    if url and url not in existing_urls:
+                        self.state.researched_retailers.append(r)
+                        existing_urls.add(url)
+                        added += 1
 
             if self.verbose:
                 retailer_count = len(improved_retailers)
@@ -502,11 +640,11 @@ class ProductSearchFlow(Flow[ProductSearchState]):
 
             result = extraction_crew.kickoff()
 
-            # Parse extraction results
-            if hasattr(result, 'raw') and result.raw:
-                extraction_data = json.loads(result.raw)
+            if hasattr(result, 'pydantic') and getattr(result, 'pydantic') is not None:
+                extraction_data = result.pydantic.model_dump()
             else:
-                extraction_data = json.loads(str(result))
+                # Parse extraction results safely
+                extraction_data = self._safe_parse_json(result, default={"products": []})
 
             # Store current retailer products
             self.state.current_retailer_products = extraction_data.get('products', [])

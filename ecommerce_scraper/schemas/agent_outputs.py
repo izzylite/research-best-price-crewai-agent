@@ -1,0 +1,74 @@
+"""Pydantic output schemas for agent task results to enforce strict JSON outputs."""
+
+from typing import List, Optional, Dict, Any
+from pydantic import BaseModel, Field
+
+
+class ResearchRetailer(BaseModel):
+    name: str = Field(..., description="Retailer name")
+    website: Optional[str] = Field(None, description="Retailer domain without protocol")
+    product_url: Optional[str] = Field(None, description="Direct product URL if available")
+    price: Optional[str] = Field(None, description="Price string in GBP format or 'Price not available'")
+    availability: Optional[str] = Field(None, description="Availability status")
+    notes: Optional[str] = Field(None, description="Additional notes")
+
+
+class ResearchResult(BaseModel):
+    product_query: str = Field(..., description="Original product query")
+    retailers: List[ResearchRetailer] = Field(default_factory=list, description="List of found retailers")
+    research_summary: Optional[str] = Field(None, description="Summary of findings")
+    total_found: Optional[int] = Field(None, description="Total retailers found")
+    research_complete: Optional[bool] = Field(default=True, description="Whether research completed successfully")
+
+
+class ExtractionProduct(BaseModel):
+    name: str = Field(..., description="Product name as displayed")
+    website: Optional[str] = Field(None, description="Retailer website URL or domain")
+    url: str = Field(..., description="Direct product page URL")
+    price: str = Field(..., description="Price in GBP format")
+
+
+class ExtractionSummary(BaseModel):
+    search_query: str
+    retailer: str
+    total_products_found: Optional[int] = None
+    extraction_successful: Optional[bool] = None
+    retry_attempt: Optional[int] = None
+    feedback_applied: Optional[bool] = None
+
+
+class ExtractionResult(BaseModel):
+    products: List[ExtractionProduct] = Field(default_factory=list)
+    errors: Optional[List[str]] = None
+    extraction_summary: Optional[ExtractionSummary] = None
+
+
+class AgentFeedback(BaseModel):
+    target_agent: Optional[str] = None
+    should_retry: Optional[bool] = None
+    priority: Optional[str] = None
+    issues: Optional[List[str]] = None
+    retry_recommendations: Optional[List[str]] = None
+    alternative_retailers: Optional[List[str]] = None
+    search_refinements: Optional[List[str]] = None
+    extraction_improvements: Optional[List[str]] = None
+    schema_fixes: Optional[List[str]] = None
+
+
+class RetryStrategy(BaseModel):
+    recommended_approach: Optional[str] = None
+    success_probability: Optional[float] = None
+    reasoning: Optional[str] = None
+    next_steps: Optional[List[str]] = None
+
+
+class TargetedFeedbackResult(BaseModel):
+    search_query: str
+    retailer: str
+    attempt_number: int
+    max_attempts: int
+    failure_analysis: Optional[Dict[str, Any]] = None
+    research_feedback: Optional[AgentFeedback] = None
+    extraction_feedback: Optional[AgentFeedback] = None
+    retry_strategy: Optional[RetryStrategy] = None
+

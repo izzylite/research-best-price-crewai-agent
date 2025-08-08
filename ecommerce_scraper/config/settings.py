@@ -22,6 +22,8 @@ class Settings(BaseSettings):
     
     # Stagehand Configuration
     stagehand_model_name: str = Field("gpt-4o", env="STAGEHAND_MODEL_NAME")
+    # Agents (CrewAI) LLM Configuration - separate from Stagehand
+    agent_model_name: str = Field("gpt-4o", env="AGENT_MODEL_NAME")
     stagehand_headless: bool = Field(True, env="STAGEHAND_HEADLESS")
     stagehand_verbose: int = Field(1, env="STAGEHAND_VERBOSE")
     stagehand_dom_settle_timeout_ms: int = Field(5000, env="STAGEHAND_DOM_SETTLE_TIMEOUT_MS")
@@ -74,9 +76,9 @@ class Settings(BaseSettings):
         "extra": "allow"  # Allow extra fields for new configurations
     }
     
-    def get_model_api_key(self) -> str:
-        """Get the appropriate API key based on the selected model."""
-        model_name = self.stagehand_model_name.lower()
+    def get_api_key_for_model(self, model_name: str) -> str:
+        """Get the appropriate API key based on the given model name."""
+        model_name = (model_name or "").lower()
         if "gpt" in model_name:
             if not self.openai_api_key:
                 raise ValueError("OpenAI API key is required for GPT models")
@@ -94,6 +96,10 @@ class Settings(BaseSettings):
             if self.openai_api_key:
                 return self.openai_api_key
             raise ValueError("Could not determine model type and no default API key is available.")
+
+    def get_model_api_key(self) -> str:
+        """Get the API key for the configured Stagehand model (backward compatible)."""
+        return self.get_api_key_for_model(self.stagehand_model_name)
 
     def setup_logging(self) -> None:
         """Setup logging configuration."""
