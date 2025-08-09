@@ -1,8 +1,10 @@
-"""Logging package for ecommerce scraping."""
+"""Logging package for ecommerce scraping.
 
-from .ai_logger import get_ai_logger, close_ai_logger
+Exports error-only logger utilities.
+"""
+
+from .error_logger import get_error_logger
 
 __all__ = [
-    'get_ai_logger',
-    'close_ai_logger'
+    'get_error_logger',
 ]

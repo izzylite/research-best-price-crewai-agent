@@ -6,25 +6,50 @@ from ..config.settings import settings
 from ..config.settings import settings
 from ..config.sites import get_site_config_by_vendor, SiteConfig
 from ..schemas.agent_outputs import ExtractionResult
+from ..ai_logging.error_logger import get_error_logger
+
+# Optional Selenium fallback from crewai-tools
+try:
+    from crewai_tools import SeleniumScrapingTool  # type: ignore
+    _SELENIUM_AVAILABLE = True
+except Exception:
+    SeleniumScrapingTool = None  # type: ignore
+    _SELENIUM_AVAILABLE = False
 
 
 class ExtractionAgent:
     """Specialized agent for StandardizedProduct data extraction with feedback loop support."""
 
     def __init__(self, stagehand_tool=None, verbose: bool = True, tools: List = None, llm: Optional[LLM] = None):
-        """Initialize the extraction agent with StagehandTool + PriceExtractor + ImageExtractor."""
+        """Initialize the extraction agent with StagehandTool + SeleniumScrapingTool."""
         # Handle both old (tools, llm) and new (stagehand_tool, verbose) calling patterns
-        if stagehand_tool is not None:
-            # New Flow-based calling pattern
-            tools = [stagehand_tool] if stagehand_tool else []
-        elif tools is None:
-            tools = []
+        supplemental_tools: List[Any] = []
+        if _SELENIUM_AVAILABLE:
+            try:
+                if SeleniumScrapingTool is not None:
+                    supplemental_tools.append(SeleniumScrapingTool())
+            except Exception:
+                pass
+
+        # Build final tool list to ensure Crew surfaces all supplemental tools
+        final_tools: List[Any] = []
+        if stagehand_tool:
+            final_tools.append(stagehand_tool)
+        final_tools.extend(supplemental_tools)
+        if tools:
+            names = {getattr(t, "name", str(type(t))) for t in final_tools}
+            for t in tools:
+                n = getattr(t, "name", str(type(t)))
+                if n not in names:
+                    final_tools.append(t)
+                    names.add(n)
+        tools = final_tools
         
         agent_config = {
-            "role": "StandardizedProduct Data Extraction Specialist",
+            "role": "Data Extraction Specialist",
             "goal": """
             Extract comprehensive and accurate product information from prepared ecommerce pages,
-            ensuring strict StandardizedProduct schema compliance. Process re-extraction requests
+            ensuring strict schema compliance. Process re-extraction requests
             from ValidationAgent to improve data quality through feedback loops.
             """,
             "backstory": """
@@ -34,21 +59,16 @@ class ExtractionAgent:
             dismiss blocking popups before searching on the site or extracting data using the provided tool.
 
             Your core expertise includes:
-            - StandardizedProduct schema compliance for all extractions
+           
             - UK retail platform product data structures (ASDA, Tesco, Waitrose, etc.)
-            - Vendor-specific pricing formats and GBP currency handling
-            - Product weight extraction for grocery and retail items
-            - Category standardization across different vendor taxonomies
-            - High-resolution product image URL extraction
+            - Vendor-specific pricing formats and GBP currency handling 
             - Re-extraction based on ValidationAgent feedback
-            - Handling vendor-specific product variants and options
             - Managing dynamic content and JavaScript-rendered data
-            - Recognizing vendor-specific structured data markup
             - Quality improvement through iterative extraction
             
             CRITICAL: Prefer extracting from pages prepared by research and validation.
             If the page is not directly extractable, you may navigate to the target URL,
-            handle simple popups, and proceed with schema-aligned extraction.
+            handle simple popups and banners by dismissing them, and proceed with schema-aligned extraction.
             """,
             "verbose": verbose,
             "allow_delegation": False,
@@ -69,7 +89,32 @@ class ExtractionAgent:
             except Exception:
                 pass
 
+        self.error_logger = get_error_logger("extraction_agent")
         self.agent = Agent(**agent_config)
+
+    def _tools_summary(self) -> Dict[str, str]:
+        """Summarize available tool names to avoid name mismatches at runtime.
+
+        Returns a dict with keys:
+        - stagehand: the exact name for Stagehand tool
+        - others: comma-separated list of other scraping tools available
+        - selenium: the exact Selenium tool name if present, else empty string
+        """
+        names: List[str] = []
+        stagehand = "simplified_stagehand_tool"
+        selenium = ""
+        try:
+            for tool in getattr(self.agent, "tools", []) or []:
+                name = getattr(tool, "name", type(tool).__name__)
+                names.append(name)
+                if name.lower() == "simplified_stagehand_tool":
+                    stagehand = name
+                if "selenium" in name.lower():
+                    selenium = name
+        except Exception:
+            pass
+        others = ", ".join([n for n in names if n != stagehand])
+        return {"stagehand": stagehand, "others": others, "selenium": selenium}
 
     def get_agent(self) -> Agent:
         """Get the CrewAI agent instance."""
@@ -107,99 +152,40 @@ class ExtractionAgent:
         """
         from crewai import Task
 
+        names = self._tools_summary()
         task_description = f"""
-        You are tasked with extracting product information from the {retailer} website for "{product_query}".
-         Your goal is to navigate to the provided URL and extract product name, website, url, and price using the simplified_stagehand_tool.
+        Goal: Extract name, website, url, price for "{product_query}" from {retailer} at {retailer_url}.
 
-        **EXTRACTION PARAMETERS:**
-        Product Query: {product_query}
-        Retailer: {retailer}
-        Target URL: {retailer_url}
-        Session ID: {session_id}
+        Inputs: product_query, retailer, retailer_url, session_id={session_id}
 
-        **AVAILABLE TOOL:**
-        - simplified_stagehand_tool: Use this for all navigation and extraction operations
+        Tools:
+        - Primary: {names["stagehand"]} (navigate → observe → act → extract)
+        - Fallback (only if present): {names["selenium"]}
 
-        **STEP-BY-STEP PROCESS:**
-        1. **Navigate to URL:** Use simplified_stagehand_tool with operation "navigate" to go to {retailer_url}
-        2. **Handle Popups:** Use simplified_stagehand_tool with operation "act" to dismiss any popups, cookie banners, or overlays
-        3. **Classify Page (OBSERVE):** Use simplified_stagehand_tool with operation "observe" (set return_action=true) to determine if current page is a direct product page vs a general site/search page.
-           - Direct product page indicators: single product title, price, primary CTA (Add to basket/Buy now)
-           - Non-product page indicators: search/home/category pages, product grids/lists
-        4. **If NOT a direct product page → SEARCH ON THE SITE:**
-           - Use "observe" (return_action=true) to locate the site search input and search button/icon
-           - Use "act" to execute the returned action(s) to focus the input, then type "{product_query}" and submit (Enter or click search icon)
-           - After results load, use "observe" (return_action=true) to identify the most relevant product card/link (closest title match to "{product_query}")
-           - If a match is found, use "act" to click it to open the product page. If no match is found, stop and return an empty products array with extraction_successful=false (the Flow will move to the next URL)
-           - Verify arrival on a product page (see indicators above) before extracting
-        5. **Extract Product Data:** Use simplified_stagehand_tool with operation "extract" and custom schema to get:
-           - name (exact product name as displayed)
-           - website (retailer website URL or domain)
-           - url (direct product page URL)
-           - price (in GBP format with £ symbol)
+        Procedure:
+        1) Navigate to {retailer_url}. If the page is an error/soft-404/404/5xx (e.g., "Looking for something?", "Page not found", "not a functioning page"), immediately return products=[] and extraction_successful=false.
+        2) Observe to classify page. If not a product page, perform one on-site search for "{product_query}" and open the best match; if none found, return empty products.
+        3) On a product page, extract fields. Prefer {names["stagehand"]} extract then use the product page url for the url field; if observe/act cannot locate elements or the page is highly dynamic, use Selenium fallback to perform the interaction and complete extraction.
 
-        **CUSTOM EXTRACTION SCHEMA:**
-        Use this exact schema definition for extraction:
-        {{
-          "fields": {{
-            "name": "str",
-            "website": "optional_url",
-            "url": "optional_url",
-            "price": "str"
-          }},
-          "name": "Product",
-          "is_list": true
-        }}
+        Constraints:
+        - One on-site search attempt; no crawling multiple pages
+        - Prices must be GBP (e.g., £XX.XX); URLs must be direct product pages
 
-        **EXTRACTION REQUIREMENTS:**
-        - Focus on products that match or closely relate to "{product_query}"
-        - Ensure prices are in GBP format (£XX.XX)
-        - Get direct product page URLs when possible
-        - Include retailer website domain when available
-        - Handle errors gracefully and document any issues
-
-        **ERROR HANDLING:**
-        - If navigation fails, document the error
-        - If product information is incomplete, extract what's available
-        - If no matching products found, report this clearly
-        - Include error details in the response for debugging
-
-        **DIRECT PRODUCT CHECK & CRITERIA:**
-        - Treat URLs containing /search, /category, /categories, or pages showing grids/lists as NOT product pages
-        - Treat pages with a single product title, price, and primary action (Add to basket/Buy now) as product pages
-        - Always confirm using an "observe" step before extraction
-
-        **CRITICAL INSTRUCTIONS:**
-        1. Always use the exact tool name "simplified_stagehand_tool"
-        2. Use appropriate operation parameters: "navigate", "act", or "extract"
-        3. For extraction, include the custom schema parameter:
-           Tool: simplified_stagehand_tool
-           Action Input: {{
-             "operation": "extract",
-             "instruction": "Extract product information for {product_query}",
-             "schema": {{
-               "fields": {{"name": "str", "website": "optional_url", "url": "optional_url", "price": "str"}},
-               "name": "Product",
-               "is_list": true
-             }}
-           }}
-        4. Use "observe" with return_action=true and pass returned actions to "act" whenever interacting (typing/clicking) to avoid DOM drift
-        5. Focus on extracting complete product information (name, website, url, price)
-        6. If no product can be found via on-site search, return products=[] and set extraction_successful=false
-        7. Validate that extracted data is relevant to "{product_query}"
+        Output JSON only per contract below.
         """
 
-        return Task(
-            description=task_description,
-            agent=self.agent,
-            expected_output=f"""
+        try:
+            return Task(
+                description=task_description,
+                agent=self.agent,
+                expected_output=f"""
             Return a valid JSON object only (no extra text):
             {{
               "products": [
                 {{
                   "name": "Exact product name from site",
-                  "website": "https://{retailer}.com",
-                  "url": "{retailer_url}",
+                  "website": "website url",
+                  "url": "direct product page url",
                   "price": "£XX.XX"
                 }}
               ],
@@ -208,8 +194,7 @@ class ExtractionAgent:
               ],
               "extraction_summary": {{
                 "search_query": "{product_query}",
-                "retailer": "{retailer}",
-                "total_products_found": <number>,
+                "retailer": "{retailer}", 
                 "extraction_successful": <true/false>
               }}
             }}
@@ -217,11 +202,14 @@ class ExtractionAgent:
             IMPORTANT:
             - Output JSON only, no wrappers or tags
             - If no errors occur, you may omit the "errors" key
-            - Ensure all URLs, names, images, and prices are accurately extracted
+            - Ensure all URLs, names, and prices are accurately extracted
             - Handle any extraction errors gracefully and include them in the errors array
             """,
-            output_pydantic=ExtractionResult
-        )
+                output_pydantic=ExtractionResult
+            )
+        except Exception as e:
+            self.error_logger.error(f"Failed to create extraction task: {e}", exc_info=True)
+            raise
 
     
     def create_feedback_enhanced_extraction_task(self,
@@ -244,7 +232,7 @@ class ExtractionAgent:
         {
           "fields": {
             "name": "str",           // Product name as displayed
-            "image": "optional_url", // Main product image URL (HttpUrl validation)
+            "url": "str",            // direct product page url
             "price": "str"           // Product price in GBP format (£XX.XX)
           },
           "name": "Product",
@@ -277,87 +265,39 @@ class ExtractionAgent:
         refinements_text = "\n".join(f"- {ref}" for ref in search_refinements) if search_refinements else "- Use original search query"
 
         task_description = f"""
-        You are tasked with extracting product information from the {retailer} website for "{product_query}".
-        This is retry attempt #{attempt_number} with validation feedback to improve extraction quality.
+        Goal (retry #{attempt_number}): Extract product fields for "{product_query}" from {retailer} at {retailer_url}, applying prior feedback.
 
-        **EXTRACTION PARAMETERS:**
-        Product Query: {product_query}
-        Retailer: {retailer}
-        Target URL: {retailer_url}
-        Retry Attempt: {attempt_number}
-        Session ID: {session_id}
+        Feedback summary:
+        - Issues: {issues_text}
+        - Recommendations: {recommendations_text}
+        - Improvements: {improvements_text}
+        - Search refinements: {refinements_text}
 
-        **VALIDATION FEEDBACK FROM PREVIOUS ATTEMPT:**
+        Tools (order): Stagehand → SeleniumScrapingTool (fallback only if needed).
 
-        Primary Issues Identified:
-        {issues_text}
+        Procedure:
+        1) Navigate to {retailer_url}. If error/soft-404/404/5xx (“Looking for something?”, “Page not found”, “not a functioning page”), return products=[] and extraction_successful=false.
+        2) Apply the feedback above while classifying/searching:
+           - If not a product page, perform one on-site search for "{product_query}" (using refined terms if given).
+           - Open the best match; if none, return empty products.
+        3) Extract fields on product page and use the product page url for the url field. Prefer Stagehand extract; use Selenium only if observe/act is unreliable or the page is highly dynamic.
 
-        Retry Recommendations:
-        {recommendations_text}
+        Constraints: one on-site search attempt; GBP pricing; direct product URL required.
 
-        Extraction Improvements Needed:
-        {improvements_text}
-
-        Search Query Refinements:
-        {refinements_text}
-
-        **FEEDBACK-ENHANCED EXTRACTION PROCESS:**
-        1. **Navigate to URL:** Use simplified_stagehand_tool with operation "navigate" to go to {retailer_url}
-        2. **Handle Popups:** Use simplified_stagehand_tool with operation "act" to dismiss any popups, cookie banners, or overlays
-        3. **Apply Feedback:** Implement the retry recommendations and extraction improvements listed above
-        4. **Enhanced Search:** If search refinements are suggested, try alternative search terms or approaches
-        5. **Improved Extraction:** Use simplified_stagehand_tool with operation "extract" and custom schema, focusing on the identified issues
-
-        **CUSTOM EXTRACTION SCHEMA:**
-        Use this exact schema definition for extraction:
-        {{
-          "fields": {{
-            "name": "str",
-            "image": "optional_url",
-            "price": "str"
-          }},
-          "name": "Product",
-          "is_list": true
-        }}
-
-        **EXTRACTION REQUIREMENTS:**
-        - Address all primary issues identified in the feedback
-        - Focus on products that closely match "{product_query}"
-        - Ensure product names are relevant and accurate
-        - Get high-quality product image URLs (main images, not thumbnails)
-        - Ensure prices are in GBP format with £ symbol
-        - Validate that extracted data addresses previous validation failures
-
-        **CRITICAL INSTRUCTIONS:**
-        1. Always use the exact tool name "simplified_stagehand_tool"
-        2. Use appropriate operation parameters: "navigate", "act", or "extract"
-        3. For extraction, include the custom schema parameter:
-           Tool: simplified_stagehand_tool
-           Action Input: {{
-             "operation": "extract",
-             "instruction": "Extract product information for {product_query}, addressing previous validation issues",
-             "schema": {{
-               "fields": {{"name": "str", "image": "optional_url", "price": "str"}},
-               "name": "Product",
-               "is_list": true
-             }}
-           }}
-        4. If the provided URL is not a product page, perform the on-site search workflow described above before extracting
-        5. Apply all feedback recommendations to improve extraction quality
-        5. Focus on resolving the specific issues identified in previous attempt
+        Output JSON only per contract below.
         """
 
-        return Task(
-            description=task_description,
-            agent=self.agent,
-            expected_output=f"""
+        try:
+            return Task(
+                description=task_description,
+                agent=self.agent,
+                expected_output=f"""
             Return a valid JSON object only (no extra text):
             {{
               "products": [
                 {{
-                  "url": "{retailer_url}",
-                  "name": "Exact product name from site",
-                  "image": "https://example.com/images/product.jpg",
+                  "url": "Direct product page url",
+                  "name": "Exact product name from site", 
                   "price": "£XX.XX"
                 }}
               ],
@@ -381,8 +321,11 @@ class ExtractionAgent:
             - Output JSON only, no wrappers or tags
             - Address all validation feedback from the previous attempt
             - If no errors occur, you may omit the "errors" key
-            - Ensure all URLs, names, images, and prices are accurately extracted
+            - Ensure all URLs, names, and prices are accurately extracted
             - Document what improvements were made based on the feedback
             """,
-            output_pydantic=ExtractionResult
-        )
+                output_pydantic=ExtractionResult
+            )
+        except Exception as e:
+            self.error_logger.error(f"Failed to create feedback-enhanced extraction task: {e}", exc_info=True)
+            raise

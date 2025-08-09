@@ -73,7 +73,7 @@ class ScrappeyTool(BaseTool):
             if not url:
                 return "Error: URL is required for Scrappey extraction"
 
-            self._logger.info(f"[SCRAPPEY] Starting {extraction_type} extraction from {url}")
+        # Info logging removed
 
             # Build Scrappey request payload
             payload = self._build_payload(
@@ -102,7 +102,7 @@ class ScrappeyTool(BaseTool):
             # Process and format the result
             formatted_result = self._process_result(result, extraction_type, vendor, category)
             
-            self._logger.info(f"[SCRAPPEY] Extraction completed successfully")
+        # Info logging removed
             return formatted_result
 
         except requests.exceptions.RequestException as e:
@@ -179,7 +179,7 @@ class ScrappeyTool(BaseTool):
                 if html_content and isinstance(html_content, str):
                     return self._extract_products_from_html(html_content, vendor, category)
                 else:
-                    self._logger.warning("No HTML content found in Scrappey response")
+                    # Warning logs removed; return empty list
                     return json.dumps([], indent=2)
             elif extraction_type in ["navigation", "observe"]:
                 return json.dumps(result, indent=2, default=str)
@@ -208,7 +208,7 @@ class ScrappeyTool(BaseTool):
                 if product_elements:
                     break
 
-            self._logger.info(f"[SCRAPPEY] Found {len(product_elements)} product elements")
+        # Info logging removed
 
             for element in product_elements:
                 try:
@@ -247,11 +247,11 @@ class ScrappeyTool(BaseTool):
                         if product['price']['amount'] > 0:
                             products.append(product)
 
-                except Exception as e:
-                    self._logger.warning(f"Error extracting product: {e}")
+                except Exception:
+                    # Skip malformed product elements silently
                     continue
 
-            self._logger.info(f"[SCRAPPEY] Successfully extracted {len(products)} products")
+        # Info logging removed
             return json.dumps(products, indent=2, default=str)
 
         except ImportError:

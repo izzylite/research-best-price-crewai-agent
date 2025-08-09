@@ -1,0 +1,19 @@
+{
+  "search_query": "ps5 pro",
+  "results": [
+    {
+      "product_name": "PlayStation®5 Pro Console",
+      "price": "£699.99",
+      "url": "https://direct.playstation.com/en-gb/buy-consoles/playstation5-pro-console",
+      "retailer": "PlayStation Direct (UK)",
+      "timestamp": "2025-08-08T23:18:07.971500"
+    }
+  ],
+  "metadata": {
+    "session_id": "product_search_20250808_231136",
+    "retailers_searched": 3,
+    "total_attempts": 3,
+    "success_rate": 0.3333333333333333,
+    "completed_at": "2025-08-08T23:18:07.971525"
+  }
+}

@@ -217,11 +217,8 @@ def create_search_result_from_raw(
                 retailer=raw_item.get('retailer', raw_item.get('vendor', 'Unknown'))
             )
             results.append(item)
-        except Exception as e:
-            # Log error but continue processing other items
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.warning(f"Failed to create ProductSearchItem from raw data: {e}")
+        except Exception:
+            # Continue processing other items without warning logs
             continue
     
     return ProductSearchResult(

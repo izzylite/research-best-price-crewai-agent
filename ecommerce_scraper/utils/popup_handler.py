@@ -270,7 +270,7 @@ def handle_common_popups(stagehand_tool, vendor: str = None) -> List[str]:
             instruction=PopupHandler.get_verification_command()
         )
 
-        logger.info(f"Popup handling completed. Actions taken: {actions_taken}")
+    # Info logging removed; rely on error logging only
 
     except Exception as e:
         logger.error(f"Error during popup handling: {str(e)}")

@@ -1,0 +1,19 @@
+{
+  "search_query": "ps5 pro",
+  "results": [
+    {
+      "product_name": "PlayStation 5 Standard Console",
+      "price": "£389.94",
+      "url": "https://www.amazon.co.uk/dp/B08H95Y452",
+      "retailer": "Amazon UK",
+      "timestamp": "2025-08-08T21:00:59.260049"
+    }
+  ],
+  "metadata": {
+    "session_id": "product_search_20250808_205933",
+    "retailers_searched": 1,
+    "total_attempts": 1,
+    "success_rate": 1.0,
+    "completed_at": "2025-08-08T21:00:59.260095"
+  }
+}

@@ -33,9 +33,9 @@ def ensure_crewai_directories(project_root: str = None):
         
         for directory in memory_dirs:
             directory.mkdir(parents=True, exist_ok=True)
-            logger.info(f"Created CrewAI memory directory: {directory}")
+    # Info logging removed
     
-    logger.info("CrewAI memory directories initialized")
+    # Info logging removed
 
 
 def clear_crewai_memory(project_root: str = None):
@@ -52,21 +52,21 @@ def clear_crewai_memory(project_root: str = None):
         if project_dir.exists():
             try:
                 shutil.rmtree(project_dir)
-                logger.info(f"Cleared CrewAI memory for project: {project_root}")
             except Exception as e:
                 logger.error(f"Failed to clear CrewAI memory: {e}")
         else:
-            logger.info(f"No CrewAI memory found for project: {project_root}")
+            # No project directory found; nothing to clear
+            pass
     else:
         # Clear all CrewAI memory
         if base_dir.exists():
             try:
                 shutil.rmtree(base_dir)
-                logger.info("Cleared all CrewAI memory")
             except Exception as e:
                 logger.error(f"Failed to clear all CrewAI memory: {e}")
         else:
-            logger.info("No CrewAI memory found")
+            # No base directory found; nothing to clear
+            pass
 
 
 def list_crewai_memory_projects():

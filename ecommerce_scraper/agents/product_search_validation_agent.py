@@ -10,8 +10,17 @@ from ..config.settings import settings
 from ..schemas.product_search_extraction import ProductSearchExtraction
 from ..tools.agent_capabilities_reference_tool import AgentCapabilitiesReferenceTool
 from ..schemas.agent_outputs import TargetedFeedbackResult
+from ..ai_logging.error_logger import get_error_logger
 
 logger = logging.getLogger(__name__)
+
+# Optional Selenium fallback from crewai-tools for verification tasks
+try:
+    from crewai_tools import SeleniumScrapingTool  # type: ignore
+    _SELENIUM_AVAILABLE = True
+except Exception:
+    SeleniumScrapingTool = None  # type: ignore
+    _SELENIUM_AVAILABLE = False
 
 
 class ProductSearchValidationResult(BaseModel):
@@ -33,16 +42,35 @@ class ProductSearchValidationAgent:
         """Initialize the product search validation agent."""
         # Create agent capabilities reference tool
         capabilities_tool = AgentCapabilitiesReferenceTool()
+        
+        # Selenium fallback to help validate product pages when Stagehand struggles
+        supplemental_tools: List[Any] = []
+        if _SELENIUM_AVAILABLE and SeleniumScrapingTool is not None:
+            try:
+                supplemental_tools.append(SeleniumScrapingTool())
+            except Exception:
+                pass
 
         # Handle both old (tools, llm) and new (stagehand_tool, verbose) calling patterns
-        if stagehand_tool is not None:
-            # New Flow-based calling pattern - add capabilities tool
-            tools = [stagehand_tool, capabilities_tool] if stagehand_tool else [capabilities_tool]
-        elif tools is None:
-            tools = [capabilities_tool]
-        else:
-            # Add capabilities tool to existing tools
-            tools.append(capabilities_tool)
+        # Build final tool list ensuring consistent naming so Crew shows them to the agent
+        final_tools: List[Any] = []
+        if stagehand_tool:
+            final_tools.append(stagehand_tool)
+        # Add supplemental tools first so the UI lists them clearly
+        final_tools.extend(supplemental_tools)
+        # Always include capabilities tool
+        final_tools.append(capabilities_tool)
+
+        # If caller provided explicit tools, merge uniquely (preserve order)
+        if tools:
+            names = {getattr(t, "name", str(type(t))) for t in final_tools}
+            for t in tools:
+                n = getattr(t, "name", str(type(t)))
+                if n not in names:
+                    final_tools.append(t)
+                    names.add(n)
+
+        tools = final_tools
 
         agent_config = {
             "role": "Product Search Validation and Quality Assurance Specialist",
@@ -80,12 +108,14 @@ class ProductSearchValidationAgent:
             - Track validation success rates and improvement over retries
 
             TOOLS AVAILABLE:
+            - simplified_stagehand_tool: Navigate/observe/act/extract to open pages and verify product-page indicators
+            - SeleniumScrapingTool: Fallback browser automation to load pages and interact when Stagehand observation/act is unreliable
             - agent_capabilities_reference_tool: Get detailed information about ResearchAgent and ExtractionAgent capabilities for targeted feedback generation
             """,
             "verbose": verbose,
             "allow_delegation": False,
             "tools": tools,
-            "max_iter": 3,
+            "max_iter": 4,
             "memory": settings.enable_crew_memory
         }
 
@@ -101,7 +131,27 @@ class ProductSearchValidationAgent:
             except Exception:
                 pass
 
+        self.error_logger = get_error_logger("validation_agent")
         self.agent = Agent(**agent_config)
+
+    def _tools_summary(self) -> Dict[str, str]:
+        """Summarize available tool names so prompts reference real names.
+        Returns dict with keys: stagehand, others, selenium (may be empty)."""
+        names: List[str] = []
+        stagehand = "simplified_stagehand_tool"
+        selenium = ""
+        try:
+            for tool in getattr(self.agent, "tools", []) or []:
+                name = getattr(tool, "name", type(tool).__name__)
+                names.append(name)
+                if name.lower() == "simplified_stagehand_tool":
+                    stagehand = name
+                if "selenium" in name.lower():
+                    selenium = name
+        except Exception:
+            pass
+        others = ", ".join([n for n in names if n != stagehand])
+        return {"stagehand": stagehand, "others": others, "selenium": selenium}
 
     def get_agent(self) -> Agent:
         """Get the CrewAI agent instance."""
@@ -117,23 +167,31 @@ class ProductSearchValidationAgent:
                                             session_id: str = None):
         """Create a task for validating product search results."""
         
+        names = self._tools_summary()
         task_description = f"""
-        Validate product search results for "{search_query}" from {retailer}.
+        Validate product search results for "{search_query}" from {retailer} at {retailer_url}.
 
-        Search Query: {search_query}
-        Retailer: {retailer}
-        Target URL: {retailer_url}
+  
         Attempt Number: {attempt_number} of {max_attempts}
         Session ID: {session_id} 
         Products to Validate: {len(extracted_products)}
 
+        TOOLS:
+        - Primary: {names["stagehand"]} (navigate → observe → act → extract)
+        - Fallback (only if present): {names["selenium"]} for loading and interactions when observe/act is unreliable
+       
         VALIDATION WORKFLOW:
-        1. **Validate each extracted product against the search query**
-        2. **Check product name similarity to "{search_query}"**
-        3. **Verify retailer legitimacy and URL validity**
-        4. **Assess product availability and purchasability**
-        5. **Generate feedback for failed validations**
-        6. **Recommend retry strategies if needed**
+        **MANDATORY TOOL USAGE**: You MUST attempt to load and inspect the page using tools. Do NOT claim a URL is inaccessible or invalid without attempting the following with {names["stagehand"]}; if two attempts fail, use {names["selenium"]} when available.
+      
+        PROCEDURE:
+        1. **Navigate**: Use {names["stagehand"]} with operation="navigate" to open {retailer_url} if not already at the target URL.
+        2. **Handle popups (allowed actions only)**: If cookie/consent/geo banners block the page (common on Amazon UK), use operation="act" to accept/close, then continue. You may also scroll or expand collapsed sections. 
+        3. **Observe**: Use operation="observe" to confirm product-page indicators: distinct title, GBP price (with £), and a primary CTA (e.g., Add to Basket).
+        4. **Optional extract**: If needed, use operation="extract" with a simple schema to read name and price.
+        5. **Validate** each product against the search query.
+        6. **Verify** retailer legitimacy and URL validity based on observed/extracted DOM.
+        7. **Assess** product availability and purchasability.
+        8. **Generate feedback** for failed validations and **recommend retry strategies**.
 
         VALIDATION CRITERIA:
         
@@ -152,8 +210,18 @@ class ProductSearchValidationAgent:
         
         URL VALIDATION:
         - Must be direct product page URL, not search results or category pages
-        - Must be accessible and lead to actual product information
+        - Must be accessible and lead to actual product information (CONFIRM via tool usage)
+        - Confirm product-page indicators (unique title, price, primary CTA) using observe/extract
         - Must not be a redirect to price comparison or affiliate sites
+        
+        NON-NAVIGATION REQUIREMENT (CRITICAL):
+        - NEVER navigate away from the provided Target URL during validation. Do NOT perform on-site searches, do NOT click links that change the page location, and do NOT follow cross-sells/related items.
+        - The ONLY allowed actions are: accepting/closing blocking popups, scrolling, and expanding in-page UI elements. If the site performs a server-side redirect from the provided URL to its canonical product URL on first load, record the final URL but do not trigger any further navigation.
+        - If the provided URL is not a product page or is invalid, return a failed validation with precise reasons instead of navigating to another page.
+
+        HARD CONSTRAINTS:
+        - You are REQUIRED to use the available tools to verify accessibility and content. Returning a failure like "Unable to access" without a tool attempt is not permitted.
+        - If tool calls fail, include the specific tool errors in the feedback so the system can route retries correctly.
         
         PRICE VALIDATION:
         - Must be in GBP format with £ symbol
@@ -237,134 +305,40 @@ class ProductSearchValidationAgent:
             output_pydantic=ProductSearchValidationResult
         )
 
-    def create_feedback_generation_task(self,
-                                      validation_failures: List[Dict[str, Any]],
-                                      search_query: str,
-                                      current_attempt: int,
-                                      max_attempts: int):
-        """Create a task for generating feedback for failed validations."""
-        
-        task_description = f"""
-        Generate specific feedback and retry recommendations for failed product search validation.
-
-        Search Query: {search_query}
-        Current Attempt: {current_attempt} of {max_attempts}
-        Validation Failures: {len(validation_failures)}
-
-        FEEDBACK GENERATION REQUIREMENTS:
-        1. **Analyze specific validation failure reasons**
-        2. **Generate actionable retry recommendations**
-        3. **Suggest alternative retailers or search strategies**
-        4. **Provide search query refinements if needed**
-        5. **Assess if retry attempts are worthwhile**
-
-        FAILURE ANALYSIS:
-        - Product name mismatches: Suggest search term refinements
-        - Invalid retailers: Recommend legitimate UK retailers
-        - URL issues: Suggest different extraction approaches
-        - Price problems: Recommend price validation improvements
-        - Availability issues: Suggest alternative retailers
-
-        RETRY STRATEGY:
-        - If attempt < {max_attempts}: Provide specific retry guidance
-        - If attempt = {max_attempts}: Provide final recommendations or suggest giving up
-        - Focus on most promising retry approaches first
-        """
-
-        return Task(
-            description=task_description,
-            agent=self.agent,
-            expected_output=f"""
-            Feedback generation result:
-            {{
-              "search_query": "{search_query}",
-              "current_attempt": {current_attempt},
-              "max_attempts": {max_attempts},
-              "retry_worthwhile": <true/false>,
-              "feedback": {{
-                "primary_issues": [
-                  "Main reasons for validation failures"
-                ],
-                "retry_recommendations": [
-                  "Specific actions for next retry attempt"
-                ],
-                "alternative_retailers": [
-                  "UK retailers to try instead"
-                ],
-                "search_refinements": [
-                  "Suggested modifications to search query"
-                ],
-                "extraction_improvements": [
-                  "Suggested changes to extraction approach"
-                ]
-              }},
-              "confidence_assessment": {{
-                "retry_success_probability": <0.0-1.0>,
-                "recommended_action": "retry|try_alternatives|give_up",
-                "reasoning": "Why this recommendation was made"
-              }}
-            }}
-            
-            Provide actionable feedback for improving validation success on retry attempts.
-            """,
-            output_pydantic=TargetedFeedbackResult
-        )
-
-    def validate_product_match(self, product_name: str, search_query: str) -> float:
-        """Validate if a product name matches the search query (0.0-1.0 score)."""
-        import re
-        
-        # Normalize both strings
-        def normalize_text(text: str) -> str:
-            text = re.sub(r'[^\w\s]', ' ', text.lower())
-            return ' '.join(text.split())
-        
-        normalized_product = normalize_text(product_name)
-        normalized_query = normalize_text(search_query)
-        
-        # Simple keyword matching
-        query_words = set(normalized_query.split())
-        product_words = set(normalized_product.split())
-        
-        if not query_words:
-            return 0.0
-        
-        # Calculate overlap ratio
-        overlap = len(query_words.intersection(product_words))
-        return overlap / len(query_words)
-
-    def is_legitimate_uk_retailer(self, url: str) -> bool:
-        """Check if URL is from a legitimate UK retailer."""
-        uk_retailer_domains = [
-            'asda.com', 'tesco.com', 'waitrose.com', 'sainsburys.co.uk',
-            'amazon.co.uk', 'ebay.co.uk', 'argos.co.uk', 'currys.co.uk',
-            'johnlewis.com', 'next.co.uk', 'marksandspencer.com',
-            'boots.com', 'superdrug.com', 'wilko.com', 'diy.com'  # B&Q
-        ]
-        
-        # Price comparison sites to exclude
-        comparison_sites = [
-            'pricerunner', 'shopping.com', 'google.com/shopping',
-            'kelkoo', 'pricegrabber', 'nextag', 'bizrate'
-        ]
-        
-        url_lower = url.lower()
-        
-        # Check for comparison sites first (exclude)
-        if any(site in url_lower for site in comparison_sites):
-            return False
-        
-        # Check for legitimate UK retailers
-        return any(domain in url_lower for domain in uk_retailer_domains)
-
+  
+    
+   
     def create_targeted_feedback_task(self,
                                     search_query: str,
                                     validation_failures: List[Dict[str, Any]],
                                     retailer: str,
                                     attempt_number: int = 1,
                                     max_attempts: int = 3,
-                                    session_id: str = None):
+                                    session_id: str = None,
+                                    already_searched: Optional[List[Dict[str, Any]]] = None):
         """Create a task for generating targeted feedback for both ResearchAgent and ExtractionAgent."""
+
+        # Summarize already searched retailers to steer ResearchAgent away from duplicates
+        already_text = "None"
+        if already_searched:
+            try:
+                names = [r.get("vendor", "Unknown") for r in already_searched]
+                domains = []
+                for r in already_searched:
+                    url = r.get("url") or ""
+                    if url:
+                        try:
+                            from urllib.parse import urlparse
+                            netloc = urlparse(url).netloc
+                            if netloc:
+                                domains.append(netloc)
+                        except Exception:
+                            pass
+                names_list = ", ".join([n for n in names if n])
+                domains_list = ", ".join(sorted(set([d for d in domains if d])))
+                already_text = f"Vendors: {names_list} | Domains: {domains_list}"
+            except Exception:
+                already_text = "Provided"
 
         task_description = f"""
         Generate targeted feedback for both ResearchAgent and ExtractionAgent based on validation failures.
@@ -374,6 +348,7 @@ class ProductSearchValidationAgent:
         Attempt Number: {attempt_number} of {max_attempts}
         Session ID: {session_id}
         Validation Failures: {len(validation_failures)}
+        Already Searched Retailers (avoid duplicates): {already_text}
 
         STEP 1: GET AGENT CAPABILITIES INFORMATION
         First, use the agent_capabilities_reference_tool to understand what each agent can do:
@@ -402,6 +377,7 @@ class ProductSearchValidationAgent:
         - Focus on issues it can address with its perplexity_retailer_research_tool
         - Provide search_instructions that utilize its feedback_response_capabilities
         - Consider its limitations when making recommendations
+        - IMPORTANT: Avoid suggesting retailers that were already searched in this session. Use the list above to exclude duplicates.
 
         FOR EXTRACTIONAGENT:
         - Only suggest feedback types listed in its "feedback_types_actionable"

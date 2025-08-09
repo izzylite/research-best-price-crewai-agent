@@ -189,9 +189,6 @@ def main() -> int:
             product_query=product,
             max_retailers=max_retailers,
             search_instructions=search_instructions,
-            min_retailers=max_retailers,
-            require_gbp=True,
-            require_product_page=True,
         )
 
         try:
@@ -201,7 +198,9 @@ def main() -> int:
             payload = {"raw": raw, "retailers": []}
 
         good, issues = evaluate_results(payload)
-        print(f"Good retailers: {payload.get('ai_search_response', '')}")
+        
+        print(f"retailers: {payload.get('retailers', '')}")
+        
         print(f"Good retailers: {good}/{max_retailers}")
         if issues:
             print("Issues:")

@@ -3,9 +3,9 @@
 from typing import List, Optional, Dict, Any
 from crewai import Agent, LLM
 from ..config.settings import settings
-from ..config.settings import settings
 from ..tools.perplexity_retailer_research_tool import PerplexityRetailerResearchTool
 from ..schemas.agent_outputs import ResearchResult
+from ..ai_logging.error_logger import get_error_logger
 
 
 class ResearchAgent:
@@ -18,6 +18,7 @@ class ResearchAgent:
 
         # Use only the Perplexity research tool for retailer discovery
         tools = [perplexity_tool]
+        self.error_logger = get_error_logger("research_agent")
         
         agent_config = {
             "role": "AI-Powered Retailer Research Specialist",
@@ -63,8 +64,9 @@ class ResearchAgent:
                 from crewai import LLM as CrewLLM
                 model_name = settings.agent_model_name
                 agent_config["llm"] = CrewLLM(model=model_name)
-            except Exception:
-                pass
+            except Exception as e:
+                # Log but continue with default agent (tools-only)
+                self.error_logger.error(f"Failed to configure LLM for ResearchAgent: {e}", exc_info=True)
 
         self.agent = Agent(**agent_config)
 
@@ -111,21 +113,20 @@ class ResearchAgent:
         Do not make assumptions - use the research tool to get real data about where this product is sold.
         """
 
-        return Task(
-            description=task_description,
-            agent=self.agent,
-            expected_output=f"""
+        try:
+            return Task(
+                description=task_description,
+                agent=self.agent,
+                expected_output=f"""
             Retailer research result:
             {{
               "product_query": "{product_query}",
               "retailers": [
                 {{
-                  "name": "Retailer Name",
-                  "website": "retailer-domain.co.uk",
-                  "product_url": "direct URL to product page if found",
-                  "price": "£XX.XX or 'Price not available'",
-                  "availability": "In stock/Out of stock/Unknown",
-                  "notes": "Any relevant information about this retailer's offering"
+                  "vendor": "Retailer Name",
+                  "url": "direct product URL",
+                  "price": "£XX.XX",
+                  "notes": "optional notes"
                 }}
               ],
               "research_summary": "Brief summary of findings and recommendations",
@@ -135,8 +136,11 @@ class ResearchAgent:
 
             Provide comprehensive retailer research results with direct product URLs where possible.
             """,
-            output_pydantic=ResearchResult
-        )
+                output_pydantic=ResearchResult
+            )
+        except Exception as e:
+            self.error_logger.error(f"Failed to create retailer research task: {e}", exc_info=True)
+            raise
 
     def create_feedback_enhanced_research_task(self,
                                              product_query: str,
@@ -219,13 +223,16 @@ class ResearchAgent:
         - max_retailers: {max_retailers}
         - search_instructions: [the enhanced instructions built from feedback above]
 
+        IMPORTANT: If the validation feedback includes a list of already searched retailers/domains, exclude those from the new search. Do not return duplicates.
+
         IMPORTANT: Use the search_instructions parameter to pass all feedback recommendations to the tool for enhanced search quality.
         """
 
-        return Task(
-            description=task_description,
-            agent=self.agent,
-            expected_output=f"""
+        try:
+            return Task(
+                description=task_description,
+                agent=self.agent,
+                expected_output=f"""
             Improved retailer research result addressing validation feedback:
             {{
               "product_query": "{product_query}",
@@ -233,24 +240,12 @@ class ResearchAgent:
               "feedback_applied": true,
               "retailers": [
                 {{
-                  "name": "Improved Retailer Name",
-                  "website": "verified-retailer-domain.co.uk",
-                  "product_url": "direct URL to product page (verified)",
-                  "price": "£XX.XX or 'Price not available'",
-                  "availability": "In stock/Out of stock/Unknown",
-                  "legitimacy_verified": true,
+                  "vendor": "Improved Retailer Name",
+                  "url": "direct product URL (verified)",
+                  "price": "£XX.XX",
                   "notes": "Why this retailer is better than previous attempts"
                 }}
               ],
-              "research_improvements": {{
-                "issues_addressed": {issues},
-                "recommendations_applied": {retry_recommendations},
-                "search_refinements_used": {search_refinements},
-                "alternative_retailers_found": <number>,
-                "quality_improvements": [
-                  "List of specific improvements made based on feedback"
-                ]
-              }},
               "research_summary": "Brief summary of improved findings and how feedback was addressed",
               "total_found": <number_of_retailers>,
               "research_complete": true
@@ -258,5 +253,8 @@ class ResearchAgent:
 
             Show clear improvement over previous research attempt by addressing all validation feedback.
             """,
-            output_pydantic=ResearchResult
-        )
+                output_pydantic=ResearchResult
+            )
+        except Exception as e:
+            self.error_logger.error(f"Failed to create feedback-enhanced research task: {e}", exc_info=True)
+            raise

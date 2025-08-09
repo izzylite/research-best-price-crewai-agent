@@ -5,11 +5,9 @@ from pydantic import BaseModel, Field
 
 
 class ResearchRetailer(BaseModel):
-    name: str = Field(..., description="Retailer name")
-    website: Optional[str] = Field(None, description="Retailer domain without protocol")
-    product_url: Optional[str] = Field(None, description="Direct product URL if available")
-    price: Optional[str] = Field(None, description="Price string in GBP format or 'Price not available'")
-    availability: Optional[str] = Field(None, description="Availability status")
+    vendor: str = Field(..., description="Retailer/vendor name")
+    url: Optional[str] = Field(None, description="Direct product URL")
+    price: Optional[str] = Field(None, description="Price string as returned by research tool")
     notes: Optional[str] = Field(None, description="Additional notes")
 
 
@@ -30,8 +28,7 @@ class ExtractionProduct(BaseModel):
 
 class ExtractionSummary(BaseModel):
     search_query: str
-    retailer: str
-    total_products_found: Optional[int] = None
+    retailer: str 
     extraction_successful: Optional[bool] = None
     retry_attempt: Optional[int] = None
     feedback_applied: Optional[bool] = None
@@ -53,6 +50,10 @@ class AgentFeedback(BaseModel):
     search_refinements: Optional[List[str]] = None
     extraction_improvements: Optional[List[str]] = None
     schema_fixes: Optional[List[str]] = None
+    # New optional fields to guide ResearchAgent to avoid duplicates
+    already_searched_retailers: Optional[List[Dict[str, Any]]] = None
+    exclude_retailers: Optional[List[str]] = None  # vendor names
+    exclude_domains: Optional[List[str]] = None
 
 
 class RetryStrategy(BaseModel):

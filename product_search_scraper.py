@@ -31,7 +31,6 @@ from rich.panel import Panel
 # CrewAI Flow architecture imports
 from ecommerce_scraper.workflows.product_search_flow import ProductSearchFlow
 from ecommerce_scraper.schemas.product_search_result import ProductSearchResult
-from ecommerce_scraper.ai_logging.ai_logger import get_ai_logger, close_ai_logger
 from ecommerce_scraper.utils.crewai_setup import ensure_crewai_directories
 
 # Global variables for graceful termination
@@ -217,12 +216,6 @@ class ProductSearchScraper:
         # Ensure CrewAI directories exist
         ensure_crewai_directories("lastAttempt")
         
-        self.ai_logger = get_ai_logger(self.session_id)
-        
-        if self.verbose:
-            self.console.print(f"[bold blue]🔍 AI Logging enabled for session: {self.session_id}[/bold blue]")
-            self.console.print(f"[cyan]📁 Logs will be saved to: logs/{self.session_id}/[/cyan]")
-        
         # Flow instance will be created per search session
         self._current_flow = None
         
@@ -344,10 +337,7 @@ class ProductSearchScraper:
                 logger.warning(f"Error stopping flow: {e}")
         
         # Close AI logger
-        try:
-            close_ai_logger(self.session_id)
-        except Exception as e:
-            logger.warning(f"Error closing AI logger: {e}")
+        # (Removed: ai_logger has been deprecated and removed)
     
     def __enter__(self):
         """Context manager entry."""
@@ -460,6 +450,14 @@ def main():
     finally:
         # Cleanup
         if _scraper_instance:
+            try:
+                # Attempt to close Browserbase/Stagehand session through the flow
+                if getattr(_scraper_instance, "_current_flow", None):
+                    flow = getattr(_scraper_instance, "_current_flow")
+                    if hasattr(flow, "close_resources"):
+                        flow.close_resources()
+            except Exception as e:
+                logger.warning(f"Error closing Stagehand session in finally: {e}")
             _scraper_instance.stop_gracefully()
 
 
@@ -479,12 +477,31 @@ def display_search_results(result: ProductSearchResult):
     table.add_column("Price", style="yellow", no_wrap=True, width=10)
     table.add_column("URL", style="blue", width=40)
 
+    def to_dict(item: Any) -> Dict[str, Any]:
+        # Accept both dicts and ProductSearchItem objects
+        if isinstance(item, dict):
+            return item
+        try:
+            # Prefer model's serializer if available
+            return item.to_dict()  # type: ignore[attr-defined]
+        except Exception:
+            # Fallback attribute access
+            return {
+                "retailer": getattr(item, "retailer", "Unknown"),
+                "product_name": getattr(item, "product_name", "N/A"),
+                "price": getattr(item, "price", "N/A"),
+                "url": getattr(item, "url", "N/A"),
+            }
+
     for product in result.results:
+        pdata = to_dict(product)
+        url_value = pdata.get("url", "N/A")
+        display_url = url_value[:37] + "..." if isinstance(url_value, str) and len(url_value) > 40 else url_value
         table.add_row(
-            product.get('retailer', 'Unknown'),
-            product.get('product_name', 'N/A'),
-            product.get('price', 'N/A'),
-            product.get('url', 'N/A')[:37] + "..." if len(product.get('url', '')) > 40 else product.get('url', 'N/A')
+            pdata.get('retailer', 'Unknown'),
+            pdata.get('product_name', 'N/A'),
+            pdata.get('price', 'N/A'),
+            display_url,
         )
 
     console.print(table)

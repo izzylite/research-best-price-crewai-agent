@@ -26,6 +26,8 @@ import os
 import time
 import random
 
+from ..ai_logging.error_logger import get_error_logger
+
 logger = logging.getLogger(__name__)
 
 
@@ -34,35 +36,8 @@ class RetailerResearchInput(BaseModel):
     product_query: str = Field(..., description="Specific product to search for (e.g., 'iPhone 15 Pro', 'Samsung Galaxy S24')")
     max_retailers: int = Field(5, description="Maximum number of retailers to find")
     search_instructions: Optional[str] = Field(None, description="Optional enhanced search instructions based on feedback (e.g., 'Focus on major UK supermarkets, avoid price comparison sites')")
-    # Optional quality controls (do not break existing callers)
-    min_retailers: Optional[int] = Field(None, description="Minimum desired retailers (for evaluation only)")
-    require_gbp: Optional[bool] = Field(True, description="Require prices to be in GBP '£' format")
-    require_product_page: Optional[bool] = Field(True, description="Require URLs to look like direct product pages (not search/category)")
-    # Optional Perplexity search controls
-    search_domain_filter: Optional[List[str]] = Field(
-        default=None,
-        description="List of domains to allowlist or denylist (prefix with '-' to denylist), e.g. ['currys.co.uk', '-pinterest.com']"
-    )
-    search_context_size: Optional[str] = Field(
-        default="low",
-        description="Search context size: 'low' | 'medium' | 'high'"
-    )
-    user_country: Optional[str] = Field(
-        default="GB",
-        description="Two-letter ISO country code to bias web results (e.g., 'GB' for United Kingdom)"
-    )
-    search_after_date_filter: Optional[str] = Field(
-        default=None,
-        description="Only include sources on/after this date (MM/DD/YYYY)"
-    )
-    search_before_date_filter: Optional[str] = Field(
-        default=None,
-        description="Only include sources on/before this date (MM/DD/YYYY)"
-    )
-    search_mode: Optional[str] = Field(
-        default=None,
-        description="Search mode override (e.g., 'web', 'academic', 'sec'). Leave None for default."
-    )
+    
+    
 
 
 class PerplexityRetailerResearchTool(BaseTool):
@@ -85,15 +60,18 @@ class PerplexityRetailerResearchTool(BaseTool):
     def __init__(self):
         """Initialize the Perplexity retailer research tool."""
         super().__init__()
-        self._logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
+        self._logger = get_error_logger(self.__class__.__name__)
 
         # Get API key from environment or config
         # Prefer PERPLEXITY_API_KEY, fallback to SONAR_API_KEY per docs examples
         self._api_key = os.getenv("PERPLEXITY_API_KEY") or os.getenv("SONAR_API_KEY")
         if not self._api_key:
-            self._logger.warning("PERPLEXITY_API_KEY not found in environment variables")
+            # Warning removed per logging policy; handled at callsite
+            pass
 
         self._base_url = "https://api.perplexity.ai/chat/completions"
+        # Prefer online model for fresh web results; allow override via env
+        self._model = os.getenv("PERPLEXITY_MODEL") or "llama-3.1-sonar-large-128k-online"
         # store last response metadata (usage/citations/search_results)
         self._last_response_meta: Dict[str, Any] = {}
 
@@ -101,17 +79,7 @@ class PerplexityRetailerResearchTool(BaseTool):
         self,
         product_query: str,
         max_retailers: int = 5,
-        search_instructions: Optional[str] = None,
-        min_retailers: Optional[int] = None,
-        require_gbp: Optional[bool] = True,
-        require_product_page: Optional[bool] = True,
-        # Perplexity search controls (all optional):
-        search_domain_filter: Optional[List[str]] = None,
-        search_context_size: Optional[str] = "low",
-        user_country: Optional[str] = "GB",
-        search_after_date_filter: Optional[str] = None,
-        search_before_date_filter: Optional[str] = None,
-        search_mode: Optional[str] = None,
+        search_instructions: Optional[str] = None
     ) -> str:
         """
         Research UK retailers that sell the specified product.
@@ -125,9 +93,10 @@ class PerplexityRetailerResearchTool(BaseTool):
             JSON string with retailer information and product URLs
         """
         try:
-            self._logger.info(f"[PERPLEXITY] Researching retailers for: {product_query}")
+            # Info logging removed
             if search_instructions:
-                self._logger.info(f"[PERPLEXITY] Using enhanced search instructions: {search_instructions[:100]}...")
+                # Info logging removed
+                pass
 
             if not self._api_key:
                 return self._fallback_retailer_result(product_query, max_retailers)
@@ -139,26 +108,17 @@ class PerplexityRetailerResearchTool(BaseTool):
 
             # Call Perplexity API
             retailer_data = self._call_perplexity_api(
-                prompt,
-                search_domain_filter=search_domain_filter,
-                search_context_size=search_context_size,
-                user_country=user_country,
-                search_after_date_filter=search_after_date_filter,
-                search_before_date_filter=search_before_date_filter,
-                search_mode=search_mode,
+                prompt
             )
 
             # Parse and structure the response
             structured_result = self._structure_retailer_response(
                 retailer_data,
                 product_query,
-                max_retailers,
-                min_retailers=min_retailers,
-                require_gbp=require_gbp,
-                require_product_page=require_product_page,
+                max_retailers
             )
 
-            self._logger.info(f"[PERPLEXITY] Found {len(structured_result.get('retailers', []))} retailers")
+    # Info logging removed
             return json.dumps(structured_result, indent=2)
 
         except Exception as e:
@@ -184,7 +144,8 @@ Format your response as JSON list as follows:
 {{
 "vendor": "[Retailer Name]",
 "url": "[Product URL]",
-"price": "£[Price]"
+"price": "£[Price]",
+"notes": "[Additional notes]"
 }}
 ]
 
@@ -214,7 +175,8 @@ Format your response as JSON list as follows:
 {{
 "vendor": "[Retailer Name]",
 "url": "[Product URL]",
-"price": "£[Price]"
+"price": "£[Price]",
+"notes": "[Additional notes]"
 }}
 ]
 
@@ -228,14 +190,7 @@ Remember, your final output should only include the retailer information in the 
 
     def _call_perplexity_api(
         self,
-        prompt: str,
-        *,
-        search_domain_filter: Optional[List[str]] = None,
-        search_context_size: Optional[str] = None,
-        user_country: Optional[str] = None,
-        search_after_date_filter: Optional[str] = None,
-        search_before_date_filter: Optional[str] = None,
-        search_mode: Optional[str] = None,
+        prompt: str
     ) -> str:
         """Call Perplexity API for retailer research with search controls."""
         try:
@@ -246,7 +201,7 @@ Remember, your final output should only include the retailer information in the 
             }
             
             payload = {
-                "model": "sonar-pro",
+                "model": self._model,
                 "messages": [
                     {
                         "role": "system",
@@ -258,13 +213,15 @@ CORE RESEARCH GUIDELINES:
 3. Verify that the retailer serves UK customers
 4. Prefer in-stock items and current listings
 5. Get direct product page URLs, not search result pages or category pages
+6. Ensure the URL is a direct accessible product page, not a search result page, category page or not found page
 
 RESPONSE FORMAT:
 Always output ONLY a JSON array (no prose, no code fences) with elements:
 {
 "vendor": "Retailer Name",
 "url": "Direct Product URL",
-"price": "£Price" 
+"price": "£Price",
+"notes": "Additional notes"
 }
 
 HARD CONSTRAINTS:
@@ -287,40 +244,50 @@ Provide accurate, up-to-date information and ensure all URLs lead directly to pr
                 "max_tokens": 1000,
                 "temperature": 0.0,
                 "top_p": 0.9,
+                # Enforce strict JSON array of {vendor,url,price}
+                "response_format": {
+                    "type": "json_schema",
+                    "json_schema": {
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "vendor": {"type": "string", "minLength": 2},
+                                    "url": {"type": "string", "pattern": "^https?://"},
+                                    "price": {"type": "string"},
+                                    "notes": {"type": "string"}
+                                },
+                                "required": ["vendor", "url", "price"],
+                                "additionalProperties": False
+                            },
+                            "minItems": 0
+                        }
+                    }
+                },
             }
-
-            # Apply search controls if provided
-            if search_mode:
-                payload["search_mode"] = search_mode
-            if search_after_date_filter:
-                payload["search_after_date_filter"] = search_after_date_filter
-            if search_before_date_filter:
-                payload["search_before_date_filter"] = search_before_date_filter
-            # Default denylist to reduce noise if caller did not specify
-            default_denylist = [
-                "-pinterest.com",
-                "-reddit.com",
-                "-quora.com",
-                "-pricerunner.com",
-                "-idealo.co.uk",
-                "-pricespy.co.uk",
-                "-kelkoo.co.uk",
-                "-hotukdeals.com",
-            ]
-            if search_domain_filter is not None and isinstance(search_domain_filter, list) and len(search_domain_filter) > 0:
-                payload["search_domain_filter"] = search_domain_filter
-            else:
-                payload["search_domain_filter"] = default_denylist
-
-            web_search_options: Dict[str, Any] = {}
-            if search_context_size in {"low", "medium", "high"}:
-                web_search_options["search_context_size"] = search_context_size
-            if user_country and isinstance(user_country, str) and len(user_country) == 2:
-                web_search_options["user_location"] = {"country": user_country.upper()}
-            if web_search_options:
-                payload["web_search_options"] = web_search_options
-            
-            result = self._post_with_retries(self._base_url, headers=headers, json=payload, timeout=30)
+ 
+            try:
+                result = self._post_with_retries(self._base_url, headers=headers, json=payload, timeout=30)
+            except requests.HTTPError as http_err:
+                # Some models (especially certain online variants) may reject response_format
+                # Retry once without response_format when we get a 400 Bad Request
+                status_code = getattr(http_err.response, "status_code", None)
+                if status_code == 400 and "response_format" in payload:
+                    # Warning removed per logging policy
+                    safe_payload = dict(payload)
+                    safe_payload.pop("response_format", None)
+                    try:
+                        result = self._post_with_retries(self._base_url, headers=headers, json=safe_payload, timeout=30)
+                    except requests.HTTPError as http_err2:
+                        # Final fallback: swap to a stable model for this call only
+                        # Warning removed per logging policy
+                        fallback_payload = dict(safe_payload)
+                        fallback_payload["model"] = "sonar-pro"
+                        result = self._post_with_retries(self._base_url, headers=headers, json=fallback_payload, timeout=30)
+                else:
+                    # Non-400 or other errors: just re-raise
+                    raise
             # Preserve metadata for downstream consumers
             self._last_response_meta = {
                 "usage": result.get("usage"),
@@ -335,7 +302,7 @@ Provide accurate, up-to-date information and ensure all URLs lead directly to pr
             return retailer_data
             
         except Exception as e:
-            self._logger.error(f"Perplexity API call failed: {e}")
+            self._logger.error(f"Perplexity API call failed: {e}", exc_info=True)
             raise
 
     def _post_with_retries(self, url: str, *, headers: Dict[str, str], json: Dict[str, Any], timeout: int, max_retries: int = 3) -> Dict[str, Any]:
@@ -356,7 +323,7 @@ Provide accurate, up-to-date information and ensure all URLs lead directly to pr
                     break
                 # Exponential backoff with jitter
                 sleep_s = (2 ** attempt) + random.uniform(0, 0.25)
-                self._logger.warning(f"[PERPLEXITY] Request failed (attempt {attempt+1}/{max_retries+1}): {exc}. Retrying in {sleep_s:.2f}s...")
+                # Warning removed per logging policy
                 time.sleep(sleep_s)
                 attempt += 1
         # Exhausted retries
@@ -368,151 +335,35 @@ Provide accurate, up-to-date information and ensure all URLs lead directly to pr
         self,
         raw_response: str,
         product_query: str,
-        max_retailers: int,
-        *,
-        min_retailers: Optional[int] = None,
-        require_gbp: Optional[bool] = True,
-        require_product_page: Optional[bool] = True,
+        max_retailers: int, 
     ) -> Dict[str, Any]:
-        """Structure the Perplexity response into a standardized format."""
-        try:
-            # Try to parse as JSON first - expecting array format
-            content = raw_response.strip()
-            if content.startswith('['):
-                parsed_data = json.loads(content)
-            else:
-                # Try to salvage a JSON array from mixed content
-                parsed_data = self._salvage_json_array(content)
+        """Return minimal payload: product_query, ai_search_response (raw), total_found.
 
-            # Ensure we don't exceed max_retailers
-            if len(parsed_data) > max_retailers:
-                parsed_data = parsed_data[:max_retailers]
-
-            # Validate each retailer entry and convert to our internal format
-            validated_retailers = []
-            issues: List[str] = []
-
-            for retailer in parsed_data:
-                if not (isinstance(retailer, dict) and retailer.get('vendor') and retailer.get('url')):
-                    issues.append("Malformed entry encountered; missing vendor/url")
-                    continue
-
-                vendor_name = retailer.get('vendor', 'Unknown')
-                url = retailer.get('url', '')
-                price = retailer.get('price', 'Price not available')
-
-                # Optional quality constraints
-                url_l = url.lower()
-                if require_product_page:
-                    if any(frag in url_l for frag in ["/search", "/s?", "?q=", "/category", "/categories"]):
-                        issues.append(f"Not a product page: {url}")
-                        continue
-                if require_gbp and isinstance(price, str) and price and not price.strip().startswith('£'):
-                    issues.append(f"Non-GBP price: {price} for {url}")
-                    continue
-
-                validated_retailers.append({
-                    "name": vendor_name,
-                    "website": self._extract_domain_from_url(url),
-                    "product_url": url,
-                    "price": price if price else 'Price not available',
-                    "notes": f"Found via AI research for {product_query}"
-                })
-
-            result = {
-                "product_query": product_query,
-                "retailers": validated_retailers,
-                "research_summary": f"Found {len(validated_retailers)} UK retailers selling {product_query}",
-                "ai_search_response": raw_response,
-                "total_found": len(validated_retailers),
-                "issues": issues,
-                "requirements": {
-                    "require_gbp": require_gbp,
-                    "require_product_page": require_product_page,
-                    "requested_max": max_retailers,
-                    "requested_min": min_retailers,
-                },
-                "api_available": True,
-                # Per API docs: include useful metadata when available
-                "api_usage": self._last_response_meta.get("usage"),
-                "citations": self._last_response_meta.get("citations"),
-                "search_results": self._last_response_meta.get("search_results"),
-                "api_model": self._last_response_meta.get("model"),
-                "api_response_id": self._last_response_meta.get("id"),
-            }
-
-            return result
-
-        except json.JSONDecodeError:
-            # Fallback to text extraction
-            return self._extract_retailers_from_text(raw_response, product_query, max_retailers)
-
-    def _salvage_json_array(self, text: str) -> List[Dict[str, Any]]:
-        """Try to extract the first top-level JSON array from a text blob."""
-        import re
-        match = re.search(r"\[.*\]", text, flags=re.DOTALL)
-        if not match:
-            return []
-        try:
-            return json.loads(match.group(0))
-        except Exception:
-            return []
-
-    def _extract_domain_from_url(self, url: str) -> str:
-        """Extract domain from URL for website field."""
-        try:
-            from urllib.parse import urlparse
-            parsed = urlparse(url)
-            return parsed.netloc if parsed.netloc else url
-        except Exception:
-            return url
-
-    def _extract_retailers_from_text(
-        self,
-        text_response: str,
-        product_query: str,
-        max_retailers: int
-    ) -> Dict[str, Any]:
-        """Extract retailer information from text response."""
-        # Simple text parsing fallback
-        retailers = []
-        
-        # Common UK retailers to look for in the response (with domain mapping)
-        uk_retailers = [
-            ("ASDA", "asda.com"),
-            ("Tesco", "tesco.com"),
-            ("Waitrose", "waitrose.com"),
-            ("Amazon UK", "amazon.co.uk"),
-            ("eBay UK", "ebay.co.uk"),
-            ("Argos", "argos.co.uk"),
-            ("Currys", "currys.co.uk"),
-            ("John Lewis", "johnlewis.com"),
-            ("Next", "next.co.uk"),
-            ("Marks & Spencer", "marksandspencer.com"),
-            ("Sainsbury's", "sainsburys.co.uk"),
-            ("B&Q", "diy.com"),
-        ]
-        
-        lt = text_response.lower()
-        for retailer_name, domain in uk_retailers:
-            if retailer_name.lower() in lt and len(retailers) < max_retailers:
-                retailers.append({
-                    "name": retailer_name,
-                    "website": domain,
-                    "product_url": "",
-                    "price": "Price not available",
-                    "availability": "Unknown",
-                    "notes": f"Found mention of {retailer_name} in research"
-                })
-        
+        We compute total_found by attempting to parse a top-level JSON array from
+        the model output; otherwise total_found is 0.
+        """
+        content = (raw_response or "").strip()
+        parsed_data: List[Dict[str, Any]] = []
+        if content:
+            try:
+                if content.startswith('['):
+                    parsed_data = json.loads(content)
+                else:
+                    parsed_data = self._salvage_json_array(content)
+            except Exception:
+                parsed_data = []
+        if len(parsed_data) > max_retailers:
+            parsed_data = parsed_data[:max_retailers]
         return {
             "product_query": product_query,
-            "retailers": retailers,
-            "research_summary": "Extracted retailer information from text response",
-            "total_found": len(retailers),
-            "api_available": True
+            # Keep raw model output for auditability
+            "ai_search_response": raw_response,
+            # Also provide parsed list for pydantic consumers
+            "retailers": parsed_data,
+            "total_found": len(parsed_data),
         }
-
+ 
+    
     def _fallback_retailer_result(self, product_query: str, max_retailers: int) -> str:
         """Provide fallback result when Perplexity is unavailable."""
         # Default UK retailers for common product searches with proper URLs

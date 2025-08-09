@@ -297,11 +297,8 @@ def validate_extraction_batch(
         try:
             product = create_extraction_from_raw(raw_product, search_query, retailer)
             valid_products.append(product)
-        except Exception as e:
-            # Log error but continue processing
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.warning(f"Failed to create ProductSearchExtraction: {e}")
+        except Exception:
+            # Continue processing without warning logs
             continue
     
     return ProductSearchExtractionBatch(

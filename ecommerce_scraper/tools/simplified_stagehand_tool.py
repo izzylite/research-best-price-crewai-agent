@@ -14,11 +14,11 @@ Key features:
 
 import json
 import asyncio
-from typing import Dict, Any, Optional, Union
+from typing import Dict, Any, Optional, Union, Callable, Awaitable
 from crewai.tools import BaseTool
 from pydantic import BaseModel, Field
 
-from .custom_logger import setup_logger
+from ..ai_logging.error_logger import get_error_logger
 from ..config.settings import settings
 
 class SimplifiedStagehandInput(BaseModel):
@@ -105,6 +105,9 @@ class SimplifiedStagehandTool(BaseTool):
         We need to extract the operation and other parameters from kwargs.
         """
         try:
+            # Normalize kwargs in case the LLM passed a JSON string or a single-item list
+            kwargs = self._normalize_tool_kwargs(kwargs)
+
             # Extract operation from kwargs
             operation = kwargs.get("operation", "")
             if not operation:
@@ -116,6 +119,59 @@ class SimplifiedStagehandTool(BaseTool):
         except Exception as e:
             self.logger.error(f"Tool execution failed: {e}")
             return f"Error: {str(e)}"
+
+    def _normalize_tool_kwargs(self, kwargs: Dict[str, Any]) -> Dict[str, Any]:
+        """Accept flexible inputs (JSON strings or single-item lists) and coerce to dict.
+
+        Crew/LLM sometimes passes a string like "[{...}]" or "{...}" instead of a dict.
+        This normalizer parses those forms and returns a proper key/value dictionary.
+        """
+        try:
+            if not kwargs:
+                return {}
+
+            # Common keys where a JSON blob might be placed
+            blob_keys = [
+                "input", "action_input", "payload", "params", "data", "arg", "args"
+            ]
+
+            # If operation is present already, assume kwargs are fine
+            if "operation" in kwargs:
+                return kwargs
+
+            # If exactly one key and its value is a JSON-looking string
+            if len(kwargs) == 1:
+                only_key = next(iter(kwargs))
+                only_val = kwargs[only_key]
+                if isinstance(only_val, str) and (only_val.strip().startswith("{") or only_val.strip().startswith("[")):
+                    parsed = json.loads(only_val)
+                    if isinstance(parsed, list) and parsed and isinstance(parsed[0], dict):
+                        return parsed[0]
+                    if isinstance(parsed, dict):
+                        return parsed
+                    # Otherwise fall through
+
+            # Look for a JSON blob in common keys
+            for key in blob_keys:
+                if key in kwargs and isinstance(kwargs[key], str):
+                    text = kwargs[key].strip()
+                    if text.startswith("{") or text.startswith("["):
+                        parsed = json.loads(text)
+                        if isinstance(parsed, list) and parsed and isinstance(parsed[0], dict):
+                            return parsed[0]
+                        if isinstance(parsed, dict):
+                            return parsed
+
+            # Also handle if a list was passed directly under a generic key
+            for key, val in list(kwargs.items()):
+                if isinstance(val, list) and val and isinstance(val[0], dict) and "operation" in val[0]:
+                    return val[0]
+
+            return kwargs
+        except Exception as e:
+            # If normalization fails, return original kwargs and let downstream error
+            self.logger.warning(f"Failed to normalize tool kwargs: {e}")
+            return kwargs
 
     def _execute_operation(self, **kwargs) -> str:
         """
@@ -197,21 +253,28 @@ class SimplifiedStagehandTool(BaseTool):
     _stagehand: Optional[Any] = None
     _session_initialized: bool = False
     _logger: Optional[Any] = None
+    _session_reinit_count: int = 0
     
     def __init__(self, log_dir: str = 'logs', **kwargs):
         """Initialize the simplified Stagehand tool."""
         super().__init__(**kwargs)
         import uuid
         self._instance_id = str(uuid.uuid4())[:8]
-        self._logger = setup_logger(__name__, log_dir=log_dir)
-        self._logger.info(f"SimplifiedStagehandTool initialized - Instance ID: {self._instance_id}")
-        self._logger.info(f"Viewport configured: {self.viewport_width}x{self.viewport_height}")
-        print(f"SimplifiedStagehandTool created - Instance ID: {self._instance_id}")  # Force console output
+        # Remove non-error logging; keep only error logger
+        self._error_logger = get_error_logger("simplified_stagehand_tool")
+        # No info/console logging
 
     @property
     def logger(self):
-        """Access logger through property to avoid Pydantic field issues."""
-        return self._logger
+        """Deprecated: info/debug logging removed; keep for compatibility."""
+        class _Null:
+            def info(self, *a, **k):
+                pass
+            def debug(self, *a, **k):
+                pass
+            def warning(self, *a, **k):
+                pass
+        return _Null()
 
 
     
@@ -222,7 +285,7 @@ class SimplifiedStagehandTool(BaseTool):
                 # Import official Stagehand v0.5.0
                 from stagehand import Stagehand
 
-                self.logger.info("Initializing Stagehand v0.5.0 session...")
+                # Info logging removed
 
                 # Get credentials and model selection from settings/env
                 import os
@@ -272,9 +335,9 @@ class SimplifiedStagehandTool(BaseTool):
                 # CRITICAL FIX: Add session_id for session reuse if provided
                 if self.session_id:
                     # For Python API, session reuse might be handled differently
-                    self.logger.info(f"Reusing Browserbase session: {self.session_id}")
+                    pass
                 else:
-                    self.logger.info("Creating new Browserbase session")
+                    pass
 
                 # Create Stagehand instance with config and model API key
                 self._stagehand = Stagehand(stagehand_config, model_api_key=model_api_key)
@@ -283,7 +346,7 @@ class SimplifiedStagehandTool(BaseTool):
                 await self._stagehand.init()
                 self._session_initialized = True
 
-                self.logger.info("Stagehand v0.5.0 session initialized successfully")
+                # Info logging removed
 
                 # Store session ID for reuse (check multiple possible attributes)
                 session_id_found = None
@@ -300,15 +363,11 @@ class SimplifiedStagehandTool(BaseTool):
 
                 if session_id_found:
                     self.session_id = session_id_found
-                    self.logger.info(f"Session ID captured: {self.session_id}")
                 else:
-                    self.logger.warning("Could not retrieve session ID from Stagehand instance")
-                    # Log available attributes for debugging
-                    attrs = [attr for attr in dir(self._stagehand) if not attr.startswith('__')]
-                    self.logger.debug(f"Available Stagehand attributes: {attrs[:10]}...")  # First 10 only
+                    pass
 
             except Exception as e:
-                self.logger.error(f"Failed to initialize Stagehand v0.5.0: {e}")
+                self._error_logger.error(f"Failed to initialize Stagehand v0.5.0: {e}", exc_info=True)
                 raise Exception(f"Failed to initialize Stagehand v0.5.0: {e}")
 
         return self._stagehand
@@ -362,37 +421,31 @@ class SimplifiedStagehandTool(BaseTool):
             JSON string with extracted data matching the schema structure
         """
         try:
-            stagehand = await self._get_stagehand()
-
-            self.logger.info(f"Schema-based extraction: {instruction[:100]}...")
+            # Info logging removed
 
             # Dynamic schema creation will be handled in helper methods
 
             # Create schema based on provided definition or use default
             if schema:
-                self.logger.info("Using custom schema provided by agent")
+                pass
                 extraction_schema = self._create_dynamic_schema(schema)
             else:
-                self.logger.info("Using default product schema")
+                pass
                 extraction_schema = self._create_default_schema()
 
-            # Use schema-based extraction following official documentation
-            extraction = await stagehand.page.extract(
-                instruction,
-                schema=extraction_schema
-            )
+            async def op(sh):
+                return await sh.page.extract(
+                    instruction,
+                    schema=extraction_schema
+                )
+
+            extraction = await self._run_with_session_retry(op, "extract")
 
             # Handle the extraction result
             result_data = self._process_extraction_result(extraction)
 
             # Log extraction success
-            if isinstance(result_data, list):
-                self.logger.info(f"Successfully extracted {len(result_data)} items")
-            elif isinstance(result_data, dict):
-                items_count = len(result_data.get('products', result_data.get('items', [])))
-                self.logger.info(f"Successfully extracted {items_count} items")
-            else:
-                self.logger.info("Extraction completed")
+            # Info logging removed
 
             # Return clean JSON
             result = json.dumps(result_data, indent=2, default=str)
@@ -400,7 +453,7 @@ class SimplifiedStagehandTool(BaseTool):
 
         except Exception as error:
             error_msg = f"Failed to extract content: {str(error)}"
-            self.logger.error(f"{error_msg}")
+            self._error_logger.error(error_msg, exc_info=True)
             raise Exception(error_msg)
 
     def _create_dynamic_schema(self, schema_def: Dict[str, Any]) -> type[BaseModel]:
@@ -466,7 +519,7 @@ class SimplifiedStagehandTool(BaseTool):
                 return self._create_default_schema()
 
         except Exception as e:
-            self.logger.error(f"Failed to create dynamic schema: {e}")
+            self._error_logger.error(f"Failed to create dynamic schema: {e}", exc_info=True)
             return self._create_default_schema()
 
     def _create_default_schema(self) -> type[BaseModel]:
@@ -497,41 +550,48 @@ class SimplifiedStagehandTool(BaseTool):
             Processed data structure
         """
         try:
-            # Handle Pydantic model result
+            # Handle Pydantic model result first
             if hasattr(extraction, 'model_dump'):
                 result_dict = extraction.model_dump()
 
-                # If it has a list field (products, items, etc.), return that
+                # If it has a list-like field (products, items, etc.), return that
                 for key in ['products', 'items', 'data', 'results']:
-                    if key in result_dict:
+                    if isinstance(result_dict, dict) and key in result_dict:
                         return result_dict[key]
 
                 # Otherwise return the whole dict
                 return result_dict
 
-            # Handle direct list access
-            elif hasattr(extraction, 'products'):
-                products = extraction.products
-                if hasattr(products[0], 'model_dump') if products else False:
-                    return [p.model_dump() for p in products]
-                return products
-
-            elif hasattr(extraction, 'items'):
-                items = extraction.items
-                if hasattr(items[0], 'model_dump') if items else False:
-                    return [i.model_dump() for i in items]
-                return items
-
-            # Handle already processed data
-            elif isinstance(extraction, (list, dict)):
+            # Handle basic Python containers early to avoid attribute name collisions
+            if isinstance(extraction, list):
+                return extraction
+            if isinstance(extraction, dict):
                 return extraction
 
-            else:
-                # Last resort - try to convert to dict
-                return dict(extraction) if hasattr(extraction, '__dict__') else extraction
+            # Handle direct attribute access patterns (common for Pydantic wrappers)
+            if hasattr(extraction, 'products'):
+                products_attr = getattr(extraction, 'products')
+                # Only treat as a list-like if it's not callable (avoid methods)
+                if not callable(products_attr):
+                    products = products_attr
+                    if isinstance(products, list) and products and hasattr(products[0], 'model_dump'):
+                        return [p.model_dump() for p in products]
+                    return products
+
+            if hasattr(extraction, 'items'):
+                items_attr = getattr(extraction, 'items')
+                # Avoid dict.items() by ensuring the attribute is not callable
+                if not callable(items_attr):
+                    items = items_attr
+                    if isinstance(items, list) and items and hasattr(items[0], 'model_dump'):
+                        return [i.model_dump() for i in items]
+                    return items
+
+            # Last resort - try to convert to dict
+            return dict(extraction) if hasattr(extraction, '__dict__') else extraction
 
         except Exception as e:
-            self.logger.warning(f"Error processing extraction result: {e}")
+            self._error_logger.error(f"Error processing extraction result: {e}", exc_info=True)
             return extraction
 
 
@@ -550,24 +610,24 @@ class SimplifiedStagehandTool(BaseTool):
             Confirmation message
         """
         try:
-            stagehand = await self._get_stagehand()
-            
-            self.logger.info(f"Performing action: {action}")
-            
-            # Direct API call following official pattern
-            await stagehand.page.act({
-                "action": action,
-                **({"variables": variables} if variables else {})
-            })
+            # Info logging removed
+
+            async def op(sh):
+                return await sh.page.act({
+                    "action": action,
+                    **({"variables": variables} if variables else {})
+                })
+
+            await self._run_with_session_retry(op, "act")
             
             result = f"Action performed: {action}"
-            self.logger.info(f"{result}")
+            # Info logging removed
             
             return result
             
         except Exception as error:
             error_msg = f"Failed to perform action: {str(error)}"
-            self.logger.error(f"{error_msg}")
+            self._error_logger.error(error_msg, exc_info=True)
             raise Exception(error_msg)
     
     async def observe(self, instruction: str, return_action: bool = False) -> str:
@@ -582,24 +642,24 @@ class SimplifiedStagehandTool(BaseTool):
             JSON string with observation data
         """
         try:
-            self.logger.info(f"Starting observation with instruction: {instruction}")
-            print(f"OBSERVE (official v0.5.0) - instruction: '{instruction}'")
-
-            stagehand = await self._get_stagehand()
+            # Info logging removed
 
             # Official v0.5.0 API pattern: Simple string parameter
             # Based on our successful test: await page.observe(instruction)
-            observations = await stagehand.page.observe(instruction)
+            async def op(sh):
+                return await sh.page.observe(instruction)
+
+            observations = await self._run_with_session_retry(op, "observe")
 
             # Format result as JSON string
             result = f"Observations: {json.dumps(observations, default=str)}"
-            self.logger.info(f"Observation completed successfully")
+            # Info logging removed
 
             return result
 
         except Exception as error:
             error_msg = f"Failed to observe: {str(error)}"
-            self.logger.error(f"{error_msg}")
+            self._error_logger.error(error_msg, exc_info=True)
             raise Exception(error_msg)
     
     async def navigate(self, url: str) -> str:
@@ -615,13 +675,15 @@ class SimplifiedStagehandTool(BaseTool):
             Navigation confirmation with session info
         """
         try:
-            stagehand = await self._get_stagehand()
-            
-            self.logger.info(f"Navigating to: {url}")
-            
-            # Direct API call following official pattern (Python naming convention)
-            await stagehand.page.goto(url, wait_until="domcontentloaded")
-            
+            # Info logging removed
+
+            async def op(sh):
+                # Direct API call following official pattern (Python naming convention)
+                await sh.page.goto(url, wait_until="domcontentloaded")
+                return sh
+
+            stagehand = await self._run_with_session_retry(op, "navigate")
+
             # Return session info following official pattern (prefer snake_case)
             session_id = (
                 getattr(stagehand, 'browserbase_session_id', None)
@@ -630,13 +692,13 @@ class SimplifiedStagehandTool(BaseTool):
             )
             result = f"Navigated to: {url}\nSession: {session_id}"
             
-            self.logger.info(f"Successfully navigated to {url}")
+            # Info logging removed
             
             return result
             
         except Exception as error:
             error_msg = f"Failed to navigate: {str(error)}"
-            self.logger.error(f"{error_msg}")
+            self._error_logger.error(error_msg, exc_info=True)
             raise Exception(error_msg)
     
 
@@ -649,12 +711,60 @@ class SimplifiedStagehandTool(BaseTool):
         """Close the Stagehand session following official cleanup pattern."""
         if self._stagehand and self._session_initialized:
             try:
-                self.logger.info("Closing Stagehand session...")
+                # Info logging removed
                 await self._stagehand.close()
-                self.logger.info("Stagehand session closed successfully")
+                # Info logging removed
             except Exception as e:
                 self.logger.warning(f"Error closing Stagehand session: {e}")
             finally:
                 self._stagehand = None
                 self._session_initialized = False
                 self.session_id = None
+
+    # --- Session retry helpers ---
+    def _is_session_closed_error(self, error: Exception) -> bool:
+        msg = str(error).lower()
+        return (
+            "target page, context or browser has been closed" in msg
+            or "browser has been closed" in msg
+            or "execution context was destroyed" in msg
+            # Additional transient/network/session failure patterns observed in logs
+            or "httpx.readerror" in msg
+            or "noneype object has no attribute 'stream'" in msg
+            or "nonetype object has no attribute 'stream'" in msg
+        )
+
+    async def _run_with_session_retry(self, op: Callable[[Any], Awaitable[Any]], op_name: str):
+        """Run an operation with a one-time session reinitialization on closed-session errors.
+
+        - On first detection, close and recreate the Browserbase session, then retry once.
+        - If it happens again at any time afterwards, terminate the script.
+        """
+        try:
+            sh = await self._get_stagehand()
+            return await op(sh)
+        except Exception as first_error:
+            if self._is_session_closed_error(first_error):
+                if self._session_reinit_count == 0:
+                    self._error_logger.error(
+                        f"{op_name}: Session closed detected. Reinitializing Browserbase session once...",
+                        exc_info=True,
+                    )
+                    # Close existing session and reset state
+                    try:
+                        await self.close()
+                    except Exception:
+                        pass
+                    self._session_reinit_count = 1
+                    # Recreate and retry once
+                    sh2 = await self._get_stagehand()
+                    return await op(sh2)
+                else:
+                    self._error_logger.error(
+                        f"{op_name}: Session closed again after one retry. Exiting.",
+                        exc_info=True,
+                    )
+                    import sys
+                    raise SystemExit(1)
+            # Not a session-closed error; re-raise
+            raise

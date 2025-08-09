@@ -1,6 +1,7 @@
 """Product Search Flow - CrewAI Flow for product-specific search across UK retailers."""
 
 import json
+import asyncio
 import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -16,6 +17,7 @@ from ..agents.extraction_agent import ExtractionAgent
 from ..agents.product_search_validation_agent import ProductSearchValidationAgent
 from ..schemas.product_search_result import ProductSearchResult, ProductSearchItem
 from ..tools.simplified_stagehand_tool import SimplifiedStagehandTool
+from ..ai_logging.error_logger import get_error_logger
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +36,7 @@ class ProductSearchState(BaseModel):
     current_attempt: int = Field(1, description="Current attempt number for current retailer")
     
     # Research results
-    researched_retailers: List[Dict[str, Any]] = Field(default_factory=list, description="Retailers found by research")
+    retailers: List[Dict[str, Any]] = Field(default_factory=list, description="Retailers discovered for extraction (vendor,url,price)")
     
     # Extraction results
     current_retailer_products: List[Dict[str, Any]] = Field(default_factory=list, description="Products from current retailer")
@@ -66,6 +68,7 @@ class ProductSearchFlow(Flow[ProductSearchState]):
         super().__init__()
         self.verbose = verbose
         self.console = Console()
+        self.error_logger = get_error_logger("product_search_flow")
         
         # Initialize agents (will be created on-demand)
         self._research_agent = None
@@ -166,8 +169,39 @@ class ProductSearchFlow(Flow[ProductSearchState]):
             if parsed is not None:
                 return parsed
 
-        logger.warning("Failed to parse JSON result; returning default")
+        # Warning logs removed; return default silently per logging policy
         return default
+
+    def _parse_retailers_from_raw(self, research_data: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Parse retailers from the raw model output when structured list is missing.
+
+        Falls back to parsing the `ai_search_response` JSON string into a list.
+        """
+        try:
+            raw = research_data.get("ai_search_response", [])
+            # Already a list
+            if isinstance(raw, list):
+                return raw
+            # Try to parse when it's a JSON string
+            if isinstance(raw, str):
+                text = raw.strip()
+                if not text:
+                    return []
+                try:
+                    # Direct JSON array
+                    if text.startswith("["):
+                        parsed = json.loads(text)
+                        return parsed if isinstance(parsed, list) else []
+                    # Salvage the first JSON array in the text
+                    match = re.search(r"\[.*\]", text, re.S)
+                    if match:
+                        parsed = json.loads(match.group(0))
+                        return parsed if isinstance(parsed, list) else []
+                except Exception:
+                    return []
+        except Exception:
+            return []
+        return []
 
     def _get_stagehand_tool(self):
         """Get or create shared Stagehand tool instance."""
@@ -205,11 +239,35 @@ class ProductSearchFlow(Flow[ProductSearchState]):
             )
         return self._validation_agent
 
+    # --- Resource cleanup ---
+    def close_resources(self):
+        """Close external resources like Browserbase/Stagehand sessions."""
+        try:
+            tool = self._stagehand_tool
+            if tool is None:
+                return
+            # Close async tool.close() safely from sync context
+            try:
+                loop = asyncio.get_running_loop()
+                import nest_asyncio
+                nest_asyncio.apply(loop)
+                loop.run_until_complete(tool.close())
+            except RuntimeError:
+                # No running loop
+                asyncio.run(tool.close())
+            except Exception:
+                # If loop run fails, fallback to fresh run
+                asyncio.run(tool.close())
+        except Exception as e:
+            self.error_logger.error(f"Failed to close Stagehand session: {e}", exc_info=True)
+        finally:
+            self._stagehand_tool = None
+
     def _generate_targeted_feedback(self, validation_data: Dict[str, Any]):
         """Generate targeted feedback for both ResearchAgent and ExtractionAgent."""
         try:
-            current_retailer = self.state.researched_retailers[self.state.current_retailer_index]
-            retailer_name = current_retailer.get('name', 'Unknown')
+            current_retailer = self.state.retailers[self.state.current_retailer_index]
+            retailer_name = current_retailer.get('vendor', 'Unknown')
 
             # Create targeted feedback task
             feedback_task = self._get_validation_agent().create_targeted_feedback_task(
@@ -218,7 +276,8 @@ class ProductSearchFlow(Flow[ProductSearchState]):
                 retailer=retailer_name,
                 attempt_number=self.state.current_attempt,
                 max_attempts=self.state.max_retries,
-                session_id=self.state.session_id
+                session_id=self.state.session_id,
+                already_searched=self.state.retailers
             )
 
             # Create and execute feedback crew
@@ -271,7 +330,7 @@ class ProductSearchFlow(Flow[ProductSearchState]):
 
         except Exception as e:
             error_msg = f"Failed to initialize product search: {str(e)}"
-            logger.error(error_msg, exc_info=True)
+            self.error_logger.error(error_msg, exc_info=True)
             return {"action": "error", "error": error_msg}
     
     @listen(initialize_search)
@@ -304,17 +363,21 @@ class ProductSearchFlow(Flow[ProductSearchState]):
                 # Parse research results safely
                 research_data = self._safe_parse_json(result, default={"retailers": []})
             
-            # Store researched retailers
-            self.state.researched_retailers = research_data.get('retailers', [])
+            # Prefer pydantic `retailers` when present, else parse raw output
+            retailers = research_data.get('retailers')
+            if isinstance(retailers, list) and retailers:
+                self.state.retailers = retailers
+            else:
+                self.state.retailers = self._parse_retailers_from_raw(research_data)
             
             if self.verbose:
-                self.console.print(f"[green]✅ Found {len(self.state.researched_retailers)} retailers[/green]")
+                self.console.print(f"[green]✅ Found {len(self.state.retailers)} retailers[/green]")
             
-            return {"action": "extract_products", "retailers_found": len(self.state.researched_retailers)}
+            return {"action": "extract_products", "retailers_found": len(self.state.retailers)}
             
         except Exception as e:
             error_msg = f"Retailer research failed: {str(e)}"
-            logger.error(error_msg, exc_info=True)
+            self.error_logger.error(error_msg, exc_info=True)
             return {"action": "error", "error": error_msg}
     
     @listen(research_retailers)
@@ -325,21 +388,21 @@ class ProductSearchFlow(Flow[ProductSearchState]):
                 return {"action": "error", "error": research_result.get("error")}
             
             # Check if we have retailers to search
-            if not self.state.researched_retailers or self.state.current_retailer_index >= len(self.state.researched_retailers):
+            if not self.state.retailers or self.state.current_retailer_index >= len(self.state.retailers):
                 return {"action": "finalize", "reason": "no_more_retailers"}
             
-            current_retailer = self.state.researched_retailers[self.state.current_retailer_index]
-            retailer_name = current_retailer.get('name', 'Unknown')
+            current_retailer = self.state.retailers[self.state.current_retailer_index]
+            retailer_name = current_retailer.get('vendor', 'Unknown')
 
-            # Get retailer URL, ensuring it's valid
-            retailer_url = current_retailer.get('product_url', '')
+            # Get retailer URL; if invalid/missing, skip to next or finalize
+            retailer_url = current_retailer.get('url', '')
             if not retailer_url or retailer_url == "Price not available" or not retailer_url.startswith('http'):
-                # Fallback to website domain
-                website = current_retailer.get('website', '')
-                if website:
-                    retailer_url = f"https://{website}" if not website.startswith('http') else website
-                else:
-                    retailer_url = "https://google.com"  # Ultimate fallback
+                self.state.current_retailer_index += 1
+                self.state.current_attempt = 1
+                self.state.retailers_searched += 1
+                if self.state.current_retailer_index >= len(self.state.retailers):
+                    return {"action": "finalize", "reason": "no_more_retailers"}
+                return {"action": "extract_products", "skipped": retailer_name}
             
             if self.verbose:
                 self.console.print(f"[blue]📦 Extracting from {retailer_name}[/blue]")
@@ -382,19 +445,34 @@ class ProductSearchFlow(Flow[ProductSearchState]):
             
         except Exception as e:
             error_msg = f"Product extraction failed: {str(e)}"
-            logger.error(error_msg, exc_info=True)
+            self.error_logger.error(error_msg, exc_info=True)
             return {"action": "error", "error": error_msg}
     
     @listen(extract_products)
     def validate_products(self, extraction_result: Dict[str, Any]) -> Dict[str, Any]:
         """Validate extracted products and provide feedback for retries."""
         try:
+            # Handle terminal/empty cases from extraction safely before any indexing
+            if extraction_result.get("action") == "finalize" and extraction_result.get("reason") == "no_more_retailers":
+                # Mark as exhausted so router logic can decide next step (e.g., retry research)
+                self.state.current_retailer_products = []
+                self.state.current_retailer_index = len(self.state.retailers)
+                return {"action": "route_after_validation", "validation_passed": False}
+
             if extraction_result.get("action") == "error":
                 return {"action": "error", "error": extraction_result.get("error")}
             
-            current_retailer = self.state.researched_retailers[self.state.current_retailer_index]
-            retailer_name = current_retailer.get('name', 'Unknown')
-            product_url = current_retailer.get('product_url', current_retailer.get('url', 'Unknown'))
+            current_retailer = self.state.retailers[self.state.current_retailer_index]
+            retailer_name = current_retailer.get('vendor', 'Unknown')
+            product_url = current_retailer.get('url', '')
+            if not product_url or not product_url.startswith('http'):
+                # Skip invalid entry
+                self.state.current_retailer_index += 1
+                self.state.current_attempt = 1
+                self.state.retailers_searched += 1
+                if self.state.current_retailer_index >= len(self.state.retailers):
+                    return {"action": "finalize", "reason": "no_more_retailers"}
+                return {"action": "extract_products", "skipped": retailer_name}
             
             if self.verbose:
                 self.console.print(f"[magenta]✅ Validating Products from {retailer_name}[/magenta]")
@@ -445,7 +523,7 @@ class ProductSearchFlow(Flow[ProductSearchState]):
             
         except Exception as e:
             error_msg = f"Product validation failed: {str(e)}"
-            logger.error(error_msg, exc_info=True)
+            self.error_logger.error(error_msg, exc_info=True)
             return {"action": "error", "error": error_msg}
     
     @router(validate_products)
@@ -467,7 +545,7 @@ class ProductSearchFlow(Flow[ProductSearchState]):
                 if self.verbose:
                     self.console.print("[yellow]⏭️ No products extracted; moving to next retailer[/yellow]")
                 
-                if self.state.current_retailer_index >= len(self.state.researched_retailers):
+                if self.state.current_retailer_index >= len(self.state.retailers):
                     # If we exhausted all retailers and found nothing overall, route to feedback-driven research retry
                     if not self.state.validated_products:
                         if self.verbose:
@@ -485,7 +563,7 @@ class ProductSearchFlow(Flow[ProductSearchState]):
                 self.state.retailers_searched += 1
                 
                 # Check if we have more retailers to process
-                if self.state.current_retailer_index >= len(self.state.researched_retailers):
+                if self.state.current_retailer_index >= len(self.state.retailers):
                     return "finalize"
                 else:
                     return "extract_products"
@@ -524,7 +602,7 @@ class ProductSearchFlow(Flow[ProductSearchState]):
                     return "retry_extraction_with_feedback"
                 
         except Exception as e:
-            logger.error(f"Routing error: {str(e)}", exc_info=True)
+            self.error_logger.error(f"Routing error: {str(e)}", exc_info=True)
             return "finalize"
 
     @listen(route_after_validation)
@@ -566,27 +644,15 @@ class ProductSearchFlow(Flow[ProductSearchState]):
                 # Parse research results safely
                 research_data = self._safe_parse_json(result, default={"retailers": []})
 
-            # Update researched retailers with improved results (dedupe by product_url)
-            improved_retailers = research_data.get('retailers', [])
+            # Update researched retailers with improved results (prefer `retailers`)
+            improved_retailers = research_data.get('retailers')
+            if not isinstance(improved_retailers, list):
+                improved_retailers = self._parse_retailers_from_raw(research_data)
             if improved_retailers:
-                # Replace current retailer with the top improved candidate
-                self.state.researched_retailers[self.state.current_retailer_index] = improved_retailers[0]
-
-                # Build set of existing product URLs for dedupe
-                existing_urls = set()
-                for r in self.state.researched_retailers:
-                    url = (r.get('product_url') or '').strip().lower()
-                    if url:
-                        existing_urls.add(url)
-
-                # Extend with non-duplicate improved retailers
-                added = 0
+                # Replace current item and append rest
+                self.state.retailers[self.state.current_retailer_index] = improved_retailers[0]
                 for r in improved_retailers[1:]:
-                    url = (r.get('product_url') or '').strip().lower()
-                    if url and url not in existing_urls:
-                        self.state.researched_retailers.append(r)
-                        existing_urls.add(url)
-                        added += 1
+                    self.state.retailers.append(r)
 
             if self.verbose:
                 retailer_count = len(improved_retailers)
@@ -596,7 +662,7 @@ class ProductSearchFlow(Flow[ProductSearchState]):
 
         except Exception as e:
             error_msg = f"Research retry with feedback failed: {str(e)}"
-            logger.error(error_msg, exc_info=True)
+            self.error_logger.error(error_msg, exc_info=True)
             return {"action": "error", "error": error_msg}
 
     @listen(route_after_validation)
@@ -606,17 +672,13 @@ class ProductSearchFlow(Flow[ProductSearchState]):
             if self.verbose:
                 self.console.print(f"[yellow]🔄 Retry Extraction with Feedback (Attempt {self.state.current_attempt})[/yellow]")
 
-            current_retailer = self.state.researched_retailers[self.state.current_retailer_index]
-            retailer_name = current_retailer.get('name', 'Unknown')
+            current_retailer = self.state.retailers[self.state.current_retailer_index]
+            retailer_name = current_retailer.get('vendor', 'Unknown')
 
             # Get retailer URL with fallback logic
-            retailer_url = current_retailer.get('product_url', '')
+            retailer_url = current_retailer.get('url', '')
             if not retailer_url or retailer_url == "Price not available" or not retailer_url.startswith('http'):
-                website = current_retailer.get('website', '')
-                if website:
-                    retailer_url = f"https://{website}" if not website.startswith('http') else website
-                else:
-                    retailer_url = "https://google.com"
+                retailer_url = "https://google.com"
 
             # Use targeted feedback for extraction improvements
             extraction_feedback = self.state.targeted_feedback.get('extraction_feedback', {}) if self.state.targeted_feedback else {}
@@ -658,7 +720,7 @@ class ProductSearchFlow(Flow[ProductSearchState]):
 
         except Exception as e:
             error_msg = f"Feedback-enhanced extraction failed: {str(e)}"
-            logger.error(error_msg, exc_info=True)
+            self.error_logger.error(error_msg, exc_info=True)
             return {"action": "error", "error": error_msg}
 
     @listen(retry_research_with_feedback)
@@ -734,5 +796,5 @@ class ProductSearchFlow(Flow[ProductSearchState]):
             
         except Exception as e:
             error_msg = f"Finalization failed: {str(e)}"
-            logger.error(error_msg, exc_info=True)
+            self.error_logger.error(error_msg, exc_info=True)
             return {"action": "error", "error": error_msg}
