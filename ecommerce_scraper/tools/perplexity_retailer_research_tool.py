@@ -122,6 +122,18 @@ class PerplexityRetailerResearchTool(BaseTool):
                 max_retailers
             )
 
+            # Fallback: if no retailers found, retry once without strict schema
+            try:
+                if not structured_result.get("retailers"):
+                    fallback_raw = self._call_perplexity_api(prompt, enforce_schema=False)
+                    structured_result = self._structure_retailer_response(
+                        fallback_raw,
+                        product_query,
+                        max_retailers
+                    )
+            except Exception:
+                pass
+
             # Enforce exclusions defensively even if the model ignores the prompt
             try:
                 seen_urls = set(exclude_urls or [])
@@ -177,68 +189,58 @@ class PerplexityRetailerResearchTool(BaseTool):
 EXCLUSIONS (do NOT include these again):
 URLs already seen:
 {urls_text}
-Domains already seen:
-{domains_text}
 """
+
+        default_prompt = f"""You are tasked with finding UK retailers that currently sell "{product_query}" online.
+         Your goal is to provide accurate and up-to-date information about where UK customers can purchase this product directly.
+         
+         {exclusions_block}
+
+        CORE RESEARCH GUIDELINES:
+        1. Search for reputable UK-based online retailers that sell the specified product or keywords related to the product.
+        2. Focus on sources where customers can make purchases—not comparison sites or marketplaces.
+        3. Verify that the retailer serves UK customers.
+        4. Prioritize in-stock items and current listings.
+        5. Provide direct product page URLs—not category pages, search results, or 404s.
+
+        HARD CONSTRAINTS:
+        - Only include a retailer if you have a direct product URL (starting with http).
+        - If none qualify, respond with an empty list: [].
+        - Prefer prices in GBP with the £ symbol, when available.
+
+        RANKING & PRICE NORMALIZATION:
+        - Return results sorted by price in ascending order (cheapest first).
+        - If multiple retailers offer the same item, include only the lowest-priced listing.
+        - Place items without price information at the end of the list.
+
+        OUTPUT FORMAT:
+        Return a JSON array of objects like this:
+        [
+            {{
+                "vendor": "Retailer Name",
+                "url": "https://example.co.uk/product-page",
+                "price": "£xx.xx",
+                "notes": "Additional notes"
+            }}
+        ]
+        
+        """
 
         if search_instructions:
             # Use enhanced search instructions when provided (feedback-driven)
             prompt = f"""{search_instructions}{exclusions_block}
 
-Present your findings for at least 3 different retailers (if available) and no more than {max_retailers}. If you cannot find at least 3 retailers, explain why in your response.
-
-Format your response as JSON list as follows:
-[
-{{
-"vendor": "[Retailer Name]",
-"url": "[Product URL]",
-"price": "£[Price]",
-"notes": "[Additional notes]"
-}}
-]
-
-Repeat this format for each retailer you find.
-
-If you encounter any issues or limitations during your search, such as the product being out of stock everywhere or only available from non-UK retailers, please mention this in your response.
-
-Remember, your final output should only include the retailer information in the specified format, along with any necessary explanations about your findings. Do not include any of your search process or internal thoughts in the final response."""
+{default_prompt}"""
         else:
             # Default prompt when no enhanced instructions are provided
-            prompt = f"""You are tasked with finding UK retailers that currently sell "{product_query}" online. Your goal is to provide accurate and up-to-date information about where UK customers can purchase this product.{exclusions_block}
-
-Follow these guidelines:
-1. Search for reputable UK-based online retailers that sell the specified product.
-2. Focus on sources where customers can actually make a purchase, not comparison websites or marketplaces.
-3. Verify that the retailer ships to UK addresses.
-4. Ensure the product is currently in stock and available for purchase.
-5. Collect the following information for each retailer:
-   - Retailer name
-   - Product URL (direct link to the product page)
-   - Current price in GBP (£)
-
-Present your findings for at least 3 different retailers (if available) and no more than {max_retailers}. If you cannot find at least 3 retailers, explain why in your response.
-
-Format your response as JSON list as follows:
-[
-{{
-"vendor": "[Retailer Name]",
-"url": "[Product URL]",
-"price": "£[Price]",
-"notes": "[Additional notes]"
-}}
-]
-
-Repeat this format for each retailer you find.
-
-If you encounter any issues or limitations during your search, such as the product being out of stock everywhere or only available from non-UK retailers, please mention this in your response.
-
-Remember, your final output should only include the retailer information in the specified format, along with any necessary explanations about your findings. Do not include any of your search process or internal thoughts in the final response."""
+            prompt = default_prompt
 
         return prompt
 
     def _call_perplexity_api(
         self,
-        prompt: str
+        prompt: str,
+        enforce_schema: bool = True,
     ) -> str:
         """Call Perplexity API for retailer research with search controls."""
         try:
@@ -253,36 +255,8 @@ Remember, your final output should only include the retailer information in the 
                 "messages": [
                     {
                         "role": "system",
-                        "content": """You are an expert UK retail researcher specializing in finding legitimate UK online retailers that sell specific products. Return direct UK product URLs only.
-
-CORE RESEARCH GUIDELINES:
-1. Search for reputable UK-based online retailers that sell the specified product
-2. Focus on sources where customers can actually make a purchase, not comparison websites or marketplaces
-3. Verify that the retailer serves UK customers
-4. Prefer in-stock items and current listings
-5. Get direct product page URLs, not search result pages or category pages
-6. Ensure the URL is a direct accessible product page, not a search result page, category page or not found page
-
-RESPONSE FORMAT:
-Always output ONLY a JSON array (no prose, no code fences) with elements:
-{
-"vendor": "Retailer Name",
-"url": "Direct Product URL",
-"price": "£Price",
-"notes": "Additional notes"
-}
-
-HARD CONSTRAINTS:
-- Include a retailer ONLY if you have a direct product URL (starting with http) 
-- If you cannot find any qualifying retailers, return []
-- Prefer GBP prices with the £ symbol when available
-
-RANKING & PRICE NORMALIZATION:
-- Find the cheapest available options and SORT the array by price ascending (lowest first)
-- When multiple retailers sell identical item, include the lowest priced listing first
-- When price is unavailable, include the item at the END of the array
-
-Provide accurate, up-to-date information and ensure all URLs lead directly to product pages."""
+                        "content": """You are an expert UK retail researcher specializing in finding legitimate UK-based online retailers and providing direct product-page URLs. Always maintain a professional, concise tone.
+"""
                     },
                     {
                         "role": "user",
@@ -292,8 +266,10 @@ Provide accurate, up-to-date information and ensure all URLs lead directly to pr
                 "max_tokens": 1000,
                 "temperature": 0.0,
                 "top_p": 0.9,
-                # Enforce strict JSON array of {vendor,url,price}
-                "response_format": {
+            }
+            if enforce_schema:
+                # Enforce JSON array of {vendor,url,price?}
+                payload["response_format"] = {
                     "type": "json_schema",
                     "json_schema": {
                         "schema": {
@@ -306,14 +282,14 @@ Provide accurate, up-to-date information and ensure all URLs lead directly to pr
                                     "price": {"type": "string"},
                                     "notes": {"type": "string"}
                                 },
-                                "required": ["vendor", "url", "price"],
+                                # Make price optional to reduce empty [] responses
+                                "required": ["vendor", "url"],
                                 "additionalProperties": False
                             },
                             "minItems": 0
                         }
                     }
-                },
-            }
+                }
  
             try:
                 result = self._post_with_retries(self._base_url, headers=headers, json=payload, timeout=30)

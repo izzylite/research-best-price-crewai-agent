@@ -2,7 +2,7 @@
 Agent Capabilities Reference Tool
 
 Provides detailed information about the roles, capabilities, and responsibilities
-of ResearchAgent and ExtractionAgent to enable targeted feedback generation.
+of ResearchAgent and ConfirmationAgent to enable targeted feedback generation.
 """
 
 from typing import Dict, Any, List, Optional
@@ -12,7 +12,7 @@ from crewai.tools import BaseTool
 
 class AgentCapabilitiesInput(BaseModel):
     """Input schema for agent capabilities reference."""
-    agent_name: str = Field(..., description="Name of the agent to get capabilities for ('ResearchAgent' or 'ExtractionAgent' or 'both')")
+    agent_name: str = Field(..., description="Name of the agent to get capabilities for ('ResearchAgent' or 'ConfirmationAgent' or 'both')")
     capability_type: Optional[str] = Field(None, description="Specific capability type to focus on ('tools', 'feedback_types', 'limitations', 'all')")
 
 
@@ -21,12 +21,12 @@ class AgentCapabilitiesReferenceTool(BaseTool):
     
     name: str = "agent_capabilities_reference_tool"
     description: str = """
-    Get detailed information about ResearchAgent and ExtractionAgent capabilities, tools, 
+    Get detailed information about ResearchAgent and ConfirmationAgent capabilities, tools, 
     and feedback requirements. Use this to understand what each agent can do and what 
     types of feedback they can effectively act upon for retry improvements.
     
     Parameters:
-    - agent_name: 'ResearchAgent', 'ExtractionAgent', or 'both'
+    - agent_name: 'ResearchAgent', 'ConfirmationAgent', or 'both'
     - capability_type: 'tools', 'feedback_types', 'limitations', or 'all' (optional)
     
     Returns structured information about agent roles, tools, capabilities, and feedback requirements.
@@ -51,19 +51,19 @@ class AgentCapabilitiesReferenceTool(BaseTool):
                 
                 capabilities_data = {
                     "ResearchAgent": research_info,
-                    "ExtractionAgent": extraction_info,
+                    "ConfirmationAgent": extraction_info,
                     "feedback_routing_guidelines": self._get_feedback_routing_guidelines()
                 }
             elif agent_name.lower() in ["researchagent", "research_agent", "research"]:
                 capabilities_data = {
                     "ResearchAgent": self._get_research_agent_capabilities()
                 }
-            elif agent_name.lower() in ["extractionagent", "extraction_agent", "extraction"]:
+            elif agent_name.lower() in ["confirmationagent", "confirmation_agent", "confirmation", "extractionagent", "extraction_agent", "extraction"]:
                 capabilities_data = {
-                    "ExtractionAgent": self._get_extraction_agent_capabilities()
+                    "ConfirmationAgent": self._get_extraction_agent_capabilities()
                 }
             else:
-                return f"Error: Unknown agent name '{agent_name}'. Use 'ResearchAgent', 'ExtractionAgent', or 'both'."
+                return f"Error: Unknown agent name '{agent_name}'. Use 'ResearchAgent', 'ConfirmationAgent', or 'both'."
             
             # Filter by capability type if specified
             if capability_type and capability_type.lower() != "all":
@@ -153,97 +153,71 @@ class AgentCapabilitiesReferenceTool(BaseTool):
     def _get_extraction_agent_capabilities(self) -> Dict[str, Any]:
         """Get detailed ExtractionAgent capabilities."""
         return {
-            "role": "AI-Powered Product Data Extraction Specialist",
-            "primary_responsibility": "Extract structured product data from retailer websites using AI-powered web automation",
+            "role": "Perplexity Product Confirmation Specialist",
+            "primary_responsibility": "Confirm if a specific retailer sells a product via Perplexity and return name, url, price",
             "core_capabilities": [
-                "Navigate to retailer websites and product pages",
-                "Extract structured product data using AI-powered tools",
-                "Handle dynamic content loading and page interactions",
-                "Apply schema-based data extraction with validation",
-                "Implement feedback-enhanced extraction strategies",
-                "Ensure data quality and completeness"
+                "Confirm product availability via Perplexity",
+                "Return minimal fields: name, url, price",
+                "Use feedback-driven search_instructions for disambiguation",
+                "Report unavailable when retailer does not sell the product"
             ],
             "tools_available": {
-                "simplified_stagehand_tool": {
-                    "description": "AI-powered web automation and data extraction tool",
-                    "operations": {
-                        "navigate": "Navigate to specific URLs",
-                        "extract": "Extract structured data from web pages",
-                        "act": "Perform actions like clicking buttons",
-                        "observe": "Observe page elements and content"
-                    },
+                "perplexity_retailer_product_tool": {
+                    "description": "Confirm retailer sells product and return name, url, price",
                     "parameters": {
-                        "operation": "Type of operation to perform",
-                        "url": "URL to navigate to (for navigate operation)",
-                        "instruction": "Natural language instruction for extraction/observation",
-                        "action": "Specific action to perform (for act operation)"
+                        "product_query": "Product to confirm",
+                        "retailer": "Retailer name",
+                        "retailer_domain": "Optional domain constraint",
+                        "require_gbp": "Require GBP price",
+                        "search_instructions": "Feedback-guided disambiguation (NEW)"
                     },
                     "capabilities": [
-                        "Schema-based product data extraction",
-                        "Dynamic content handling",
-                        "Popup dismissal and page preparation",
-                        "Multi-field data extraction with validation"
+                        "Confirm purchasability",
+                        "Provide direct product URL",
+                        "Provide GBP price when available"
                     ]
                 }
             },
             "extraction_schema": {
-                "StandardizedProduct": {
+                "MinimalProduct": {
                     "required_fields": ["name", "price", "url"],
-                    "optional_fields": ["image_url", "description", "availability", "brand", "model"],
+                    "optional_fields": [],
                     "validation_rules": [
                         "Price must be in GBP format (£X.XX)",
                         "URL must be valid HTTP/HTTPS link",
-                        "Name must be non-empty string",
-                        "Image URL must be valid if provided"
+                        "Name must be non-empty string"
                     ]
                 }
             },
             "feedback_types_actionable": {
                 "data_quality_issues": [
-                    "Missing or incomplete product data",
+                    "Missing minimal fields (name, url, price)",
                     "Incorrect price formatting or currency",
-                    "Poor quality or missing product images",
-                    "Inaccurate product names or descriptions"
+                    "Inaccurate product name"
                 ],
                 "extraction_strategy_issues": [
-                    "Extraction instructions too vague or specific",
-                    "Schema compliance failures",
-                    "Dynamic content not properly loaded",
-                    "Page elements not properly identified"
-                ],
-                "navigation_issues": [
-                    "Unable to access product pages",
-                    "Popups blocking content access",
-                    "Page loading timeouts or errors",
-                    "Invalid or broken URLs from research"
+                    "Ambiguous product query",
+                    "Retailer has multiple variants",
+                    "Needs feedback-driven search_instructions"
                 ],
                 "schema_compliance_issues": [
-                    "Data doesn't match expected schema format",
-                    "Required fields missing from extracted data",
-                    "Data type mismatches (string vs number)",
-                    "Validation rules not met"
+                    "MinimalProduct schema not satisfied"
                 ]
             },
             "feedback_response_capabilities": {
-                "extraction_improvements": "Can modify extraction strategies and instructions",
-                "schema_fixes": "Can adjust data formatting to meet schema requirements",
-                "navigation_enhancements": "Can improve page navigation and popup handling",
-                "data_validation": "Can implement additional data quality checks",
-                "retry_strategies": "Can apply different extraction approaches"
+                "extraction_improvements": "Can refine product confirmation via search_instructions",
+                "schema_fixes": "Can adjust minimal field formatting",
+                "retry_strategies": "Can re-confirm with refined hints"
             },
             "limitations": [
-                "Cannot research or discover new retailers",
-                "Cannot modify or validate retailer URLs before extraction",
-                "Cannot determine if retailers actually sell products without visiting",
+                "Does not browse or scrape",
                 "Depends on ResearchAgent for retailer discovery and URLs",
-                "Requires valid, accessible URLs to perform extraction"
+                "Relies on Perplexity API availability"
             ],
             "retry_scenarios": [
-                "When extracted data is incomplete or poor quality",
-                "When schema validation fails",
-                "When navigation or page access issues occur",
-                "When extraction strategy needs refinement",
-                "When data formatting doesn't meet requirements"
+                "When minimal fields are missing or invalid",
+                "When disambiguation is needed for variants",
+                "When GBP price was not returned and is required"
             ]
         }
 
@@ -253,8 +227,7 @@ class AgentCapabilitiesReferenceTool(BaseTool):
             "research_agent_priority": {
                 "conditions": [
                     "More than 50% of validation failures are retailer-related",
-                    "URLs are invalid, inaccessible, or lead to wrong pages",
-                    "Wrong retailer types discovered (comparison sites, affiliates)",
+                    "URLs lead to comparison/affiliate sites",
                     "Retailers don't actually sell the product",
                     "International retailers instead of UK stores"
                 ],
@@ -268,16 +241,14 @@ class AgentCapabilitiesReferenceTool(BaseTool):
             "extraction_agent_priority": {
                 "conditions": [
                     "More than 50% of validation failures are data quality related",
-                    "Schema compliance issues",
-                    "Missing or incomplete product information",
-                    "Data formatting problems",
-                    "Navigation or page access issues with valid URLs"
+                    "Minimal fields missing (name, url, price)",
+                    "Price formatting not GBP",
+                    "Ambiguous product confirmation requiring hints"
                 ],
                 "feedback_focus": [
-                    "Extraction strategy improvements",
-                    "Schema compliance fixes",
-                    "Data quality enhancements",
-                    "Navigation improvements"
+                    "Refine search_instructions",
+                    "Ensure minimal fields",
+                    "Price normalization to GBP"
                 ]
             },
             "both_agents_needed": {

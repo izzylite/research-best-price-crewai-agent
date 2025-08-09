@@ -38,15 +38,14 @@ class ResearchAgent:
             - Finding direct product URLs and availability information
             - Verifying retailer legitimacy and product availability
             - Providing alternative retailer suggestions based on validation feedback
-            - Refining search strategies based on feedback to improve research quality
-            - Focusing on major UK retailers: ASDA, Tesco, Waitrose, Amazon UK, eBay UK, Argos, etc.
+            - Refining search strategies based on feedback to improve research quality 
 
             TOOLS AVAILABLE:
             - perplexity_retailer_research_tool: Use this to research UK retailers that sell specific products
 
             CRITICAL: You focus ONLY on retailer research and discovery. You do NOT handle web navigation,
             popup dismissal, or page preparation - those are handled by other agents. Your job is to find
-            the right retailers and provide accurate product URLs for the ExtractionAgent to work with.
+            the right retailers and provide accurate product URLs for the ConfirmationAgent to work with.
             """,
             "verbose": verbose,
             "allow_delegation": False,
@@ -96,7 +95,7 @@ class ResearchAgent:
            - search_instructions: (optional, for enhanced searches)
         3. **Focus on finding legitimate UK retailers that sell products directly**
         4. **Exclude price comparison sites and affiliate marketing sites**
-        5. **Prioritize major UK retailers like ASDA, Tesco, Amazon UK, eBay UK, Argos, etc.**
+        5. **Prioritize UK retailers.**
         6. **Get direct product URLs where possible**
 
         TOOLS AVAILABLE:

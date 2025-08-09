@@ -114,21 +114,7 @@ class ProductSearchExtraction(BaseModel):
         
         return similarity >= similarity_threshold
     
-    def is_valid_uk_retailer_url(self) -> bool:
-        """Check if the URL is from a legitimate UK retailer."""
-        uk_retailer_domains = [
-            'asda.com', 'tesco.com', 'waitrose.com', 'sainsburys.co.uk',
-            'amazon.co.uk', 'ebay.co.uk', 'argos.co.uk', 'currys.co.uk',
-            'johnlewis.com', 'next.co.uk', 'marksandspencer.com',
-            'boots.com', 'superdrug.com', 'wilko.com', 'b&q.co.uk',
-            'homebase.co.uk', 'screwfix.com', 'wickes.co.uk',
-            'very.co.uk', 'littlewoods.com', 'ao.com'
-        ]
-        
-        # Check if URL contains any of the UK retailer domains
-        url_lower = self.url.lower()
-        return any(domain in url_lower for domain in uk_retailer_domains)
-    
+   
     def extract_price_value(self) -> float:
         """Extract numeric price value for comparison."""
         try:
@@ -183,12 +169,7 @@ class ProductSearchExtractionBatch(BaseModel):
             }
         )
     
-    def filter_valid_uk_retailers(self) -> 'ProductSearchExtractionBatch':
-        """Filter products from valid UK retailers."""
-        valid_products = [
-            product for product in self.products 
-            if product.is_valid_uk_retailer_url()
-        ]
+   
         
         return ProductSearchExtractionBatch(
             products=valid_products,

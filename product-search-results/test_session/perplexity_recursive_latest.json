@@ -1,0 +1,53 @@
+{
+  "product_query": "iPhone 15 Pro",
+  "requested_max_retailers": 3,
+  "rounds": 1,
+  "best_good": 2,
+  "best_result": {
+    "product_query": "iPhone 15 Pro",
+    "ai_search_response": "[\n    {\n        \"vendor\": \"The Big Phone Store\",\n        \"url\": \"https://www.thebigphonestore.co.uk/products/apple-iphone-15-pro\",\n        \"price\": \"\u00a3999.99\",\n        \"notes\": \"Unlocked, 512GB, 'like new' refurbished, 12-month warranty, fast UK delivery\"\n    },\n    {\n        \"vendor\": \"Apple Certified Refurbished Store (UK)\",\n        \"url\": \"https://www.apple.com/uk/shop/refurbished/iphone/iphone-15-pro\",\n        \"price\": \"\u00a31,069\",\n        \"notes\": \"Official Apple Certified Refurbished, price for 128GB model, subject to availability\"\n    }\n]",
+    "retailers": [
+      {
+        "vendor": "The Big Phone Store",
+        "url": "https://www.thebigphonestore.co.uk/products/apple-iphone-15-pro",
+        "price": "\u00a3999.99",
+        "notes": "Unlocked, 512GB, 'like new' refurbished, 12-month warranty, fast UK delivery"
+      },
+      {
+        "vendor": "Apple Certified Refurbished Store (UK)",
+        "url": "https://www.apple.com/uk/shop/refurbished/iphone/iphone-15-pro",
+        "price": "\u00a31,069",
+        "notes": "Official Apple Certified Refurbished, price for 128GB model, subject to availability"
+      }
+    ],
+    "total_found": 2
+  },
+  "history": [
+    {
+      "attempt": 1,
+      "instructions": null,
+      "result": {
+        "product_query": "iPhone 15 Pro",
+        "ai_search_response": "[\n    {\n        \"vendor\": \"The Big Phone Store\",\n        \"url\": \"https://www.thebigphonestore.co.uk/products/apple-iphone-15-pro\",\n        \"price\": \"\u00a3999.99\",\n        \"notes\": \"Unlocked, 512GB, 'like new' refurbished, 12-month warranty, fast UK delivery\"\n    },\n    {\n        \"vendor\": \"Apple Certified Refurbished Store (UK)\",\n        \"url\": \"https://www.apple.com/uk/shop/refurbished/iphone/iphone-15-pro\",\n        \"price\": \"\u00a31,069\",\n        \"notes\": \"Official Apple Certified Refurbished, price for 128GB model, subject to availability\"\n    }\n]",
+        "retailers": [
+          {
+            "vendor": "The Big Phone Store",
+            "url": "https://www.thebigphonestore.co.uk/products/apple-iphone-15-pro",
+            "price": "\u00a3999.99",
+            "notes": "Unlocked, 512GB, 'like new' refurbished, 12-month warranty, fast UK delivery"
+          },
+          {
+            "vendor": "Apple Certified Refurbished Store (UK)",
+            "url": "https://www.apple.com/uk/shop/refurbished/iphone/iphone-15-pro",
+            "price": "\u00a31,069",
+            "notes": "Official Apple Certified Refurbished, price for 128GB model, subject to availability"
+          }
+        ],
+        "total_found": 2
+      },
+      "good": 2,
+      "issues": []
+    }
+  ],
+  "completed_at": "2025-08-09T20:52:04.639892"
+}

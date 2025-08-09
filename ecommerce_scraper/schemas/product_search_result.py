@@ -11,7 +11,7 @@ class ProductSearchItem(BaseModel):
     product_name: str = Field(..., description="Product name as found on retailer site")
     price: str = Field(..., description="Product price in GBP format (e.g., '£99.99')")
     url: str = Field(..., description="Direct URL to product page")
-    retailer: str = Field(..., description="Retailer name (e.g., 'ASDA', 'Tesco')")
+    retailer: str = Field(..., description="Retailer name (e.g., 'Amazon')")
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), description="When the product was found")
     
     @field_validator('product_name')

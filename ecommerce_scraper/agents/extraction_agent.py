@@ -1,4 +1,4 @@
-"""ExtractionAgent - Specialized agent for StandardizedProduct data extraction with re-extraction support."""
+"""ConfirmationAgent - Uses Perplexity to confirm retailer product availability and return minimal fields."""
 
 from typing import List, Optional, Dict, Any
 from crewai import Agent, LLM
@@ -6,74 +6,37 @@ from ..config.settings import settings
 from ..config.settings import settings 
 from ..schemas.agent_outputs import ExtractionResult
 from ..ai_logging.error_logger import get_error_logger
+from ..tools.perplexity_retailer_product_tool import PerplexityRetailerProductTool
 
-# Optional Selenium fallback from crewai-tools
-try:
-    from crewai_tools import SeleniumScrapingTool  # type: ignore
-    _SELENIUM_AVAILABLE = True
-except Exception:
-    SeleniumScrapingTool = None  # type: ignore
-    _SELENIUM_AVAILABLE = False
+# No browser tools required for this agent; it uses Perplexity exclusively
+_SELENIUM_AVAILABLE = False
 
 
-class ExtractionAgent:
-    """Specialized agent for StandardizedProduct data extraction with feedback loop support."""
+class ConfirmationAgent:
+    """Agent that confirms product availability via Perplexity and returns name, url, price."""
 
     def __init__(self, stagehand_tool=None, verbose: bool = True, tools: List = None, llm: Optional[LLM] = None):
-        """Initialize the extraction agent with StagehandTool + SeleniumScrapingTool."""
-        # Handle both old (tools, llm) and new (stagehand_tool, verbose) calling patterns
-        supplemental_tools: List[Any] = []
-        if _SELENIUM_AVAILABLE:
-            try:
-                if SeleniumScrapingTool is not None:
-                    supplemental_tools.append(SeleniumScrapingTool())
-            except Exception:
-                pass
-
-        # Build final tool list to ensure Crew surfaces all supplemental tools
-        final_tools: List[Any] = []
-        if stagehand_tool:
-            final_tools.append(stagehand_tool)
-        final_tools.extend(supplemental_tools)
-        if tools:
-            names = {getattr(t, "name", str(type(t))) for t in final_tools}
-            for t in tools:
-                n = getattr(t, "name", str(type(t)))
-                if n not in names:
-                    final_tools.append(t)
-                    names.add(n)
-        tools = final_tools
+        """Initialize the extraction agent with Perplexity product confirmation tool only."""
+        # Ignore browser tools; use only the Perplexity product tool
+        product_tool = PerplexityRetailerProductTool()
+        tools = [product_tool]
         
         agent_config = {
-            "role": "Data Extraction Specialist",
+            "role": "Perplexity Product Confirmation Specialist",
             "goal": """
-            Extract comprehensive and accurate product information from prepared ecommerce pages,
-            ensuring strict schema compliance. Process re-extraction requests
-            from ValidationAgent to improve data quality through feedback loops.
+            Confirm if a specific retailer sells a given product using Perplexity and, when purchasable,
+            return the product name, direct URL, and price in GBP.
             """,
             "backstory": """
-            You are a specialized product data extraction expert. Your primary responsibility is to
-            extract high-quality product data that matches the search goal. When needed to complete
-            extraction successfully, you may also perform lightweight navigation (goto a URL) and
-            dismiss blocking popups before searching on the site or extracting data using the provided tool.
-
-            Your core expertise includes:
-           
-            - UK retail platform product data structures (ASDA, Tesco, Waitrose, etc.)
-            - Vendor-specific pricing formats and GBP currency handling 
-            - Re-extraction based on ValidationAgent feedback
-            - Managing dynamic content and JavaScript-rendered data
-            - Quality improvement through iterative extraction
-            
-            CRITICAL: Prefer extracting from pages prepared by research and validation.
-            If the page is not directly extractable, you may navigate to the target URL,
-            handle simple popups and banners by dismissing them, and proceed with schema-aligned extraction.
+            You use an AI research tool (Perplexity) to verify whether a retailer has a product available to buy.
+            If available, you return minimal fields: name, url, price. You do not browse or scrape; you only call
+            the Perplexity product confirmation tool to obtain verified details.
             """,
             "verbose": verbose,
             "allow_delegation": False,
             "tools": tools,
             "max_iter": 4,
-            "memory": settings.enable_crew_memory
+            "memory": settings.enable_crew_memory,
         }
 
         if llm:
@@ -92,28 +55,19 @@ class ExtractionAgent:
         self.agent = Agent(**agent_config)
 
     def _tools_summary(self) -> Dict[str, str]:
-        """Summarize available tool names to avoid name mismatches at runtime.
-
-        Returns a dict with keys:
-        - stagehand: the exact name for Stagehand tool
-        - others: comma-separated list of other scraping tools available
-        - selenium: the exact Selenium tool name if present, else empty string
-        """
+        """Summarize available tool names for clarity."""
         names: List[str] = []
-        stagehand = "simplified_stagehand_tool"
-        selenium = ""
+        product_tool = "perplexity_retailer_product_tool"
         try:
             for tool in getattr(self.agent, "tools", []) or []:
                 name = getattr(tool, "name", type(tool).__name__)
                 names.append(name)
-                if name.lower() == "simplified_stagehand_tool":
-                    stagehand = name
-                if "selenium" in name.lower():
-                    selenium = name
+                if name.lower() == "perplexity_retailer_product_tool":
+                    product_tool = name
         except Exception:
             pass
-        others = ", ".join([n for n in names if n != stagehand])
-        return {"stagehand": stagehand, "others": others, "selenium": selenium}
+        others = ", ".join([n for n in names if n != product_tool])
+        return {"product_tool": product_tool, "others": others}
 
     def get_agent(self) -> Agent:
         """Get the CrewAI agent instance."""
@@ -150,25 +104,36 @@ class ExtractionAgent:
             CrewAI Task configured for product extraction with schema validation
         """
         from crewai import Task
+        from urllib.parse import urlparse
 
         names = self._tools_summary()
+        try:
+            retailer_domain = urlparse(retailer_url).netloc if isinstance(retailer_url, str) else ""
+        except Exception:
+            retailer_domain = ""
+
         task_description = f"""
-        Goal: Extract name, website, url, price for "{product_query}" from {retailer} at {retailer_url}.
+        Goal: Confirm if {retailer} sells "{product_query}" using {names["product_tool"]} and, if purchasable,
+        return the minimal product fields: name, url, price.
 
-        Inputs: product_query, retailer, retailer_url, session_id={session_id}
+        Inputs: product_query, retailer, retailer_domain={retailer_domain}, retailer_url={retailer_url}, session_id={session_id}
 
-        Tools:
-        - Primary: {names["stagehand"]} (navigate → observe → act → extract)
-        - Fallback (only if present): {names["selenium"]}
+        TOOL USAGE:
+        - Call {names["product_tool"]} with:
+          - product_query: "{product_query}"
+          - retailer: "{retailer}"
+          - retailer_domain: "{retailer_domain}"
+          - keywords: true
+          - search_instructions: "Allow keywords related to the product to be used in the search"
 
-        Procedure:
-        1) Navigate to {retailer_url}. If the page is an error/soft-404/404/5xx (e.g., "Looking for something?", "Page not found", "not a functioning page"), immediately return products=[] and extraction_successful=false.
-        2) Observe to classify page. If not a product page, perform one on-site search for "{product_query}" and open the best match; if none found, return empty products.
-        3) On a product page, extract fields. Prefer {names["stagehand"]} extract then use the product page url for the url field; if observe/act cannot locate elements or the page is highly dynamic, use Selenium fallback to perform the interaction and complete extraction.
+        DECISION:
+        - If the tool returns exists=false, output products=[] and extraction_successful=false.
+        - If exists=true, output a single product with fields name, url, price from the tool.
 
         Constraints:
-        - One on-site search attempt; no crawling multiple pages
-        - Prices must be GBP (e.g., £XX.XX); URLs must be direct product pages
+        - Do NOT browse or scrape; ONLY use {names["product_tool"]}.
+        - URLs must be direct product pages.
+        - Prices should be GBP (e.g., £XX.XX) when available.
 
         Output JSON only per contract below.
         """
@@ -182,8 +147,7 @@ class ExtractionAgent:
             {{
               "products": [
                 {{
-                  "name": "Exact product name from site",
-                  "website": "website url",
+                  "name": "Exact product name",
                   "url": "direct product page url",
                   "price": "£XX.XX"
                 }}
@@ -200,9 +164,9 @@ class ExtractionAgent:
 
             IMPORTANT:
             - Output JSON only, no wrappers or tags
-            - If no errors occur, you may omit the "errors" key
-            - Ensure all URLs, names, and prices are accurately extracted
-            - Handle any extraction errors gracefully and include them in the errors array
+            - If the tool returns exists=false, return products=[] and extraction_successful=false
+            - Ensure URL is a direct product page and price is GBP when available
+            - Handle any errors gracefully and include them in the errors array
             """,
                 output_pydantic=ExtractionResult
             )
@@ -250,38 +214,49 @@ class ExtractionAgent:
             CrewAI Task configured for feedback-enhanced extraction
         """
         from crewai import Task
+        from urllib.parse import urlparse
 
-        # Extract feedback components
-        primary_issues = validation_feedback.get('primary_issues', [])
-        retry_recommendations = validation_feedback.get('retry_recommendations', [])
-        extraction_improvements = validation_feedback.get('extraction_improvements', [])
-        search_refinements = validation_feedback.get('search_refinements', [])
+        # Build domain constraint from retailer_url when available
+        try:
+            retailer_domain = urlparse(retailer_url).netloc if isinstance(retailer_url, str) else ""
+        except Exception:
+            retailer_domain = ""
 
-        # Format feedback for task description
-        issues_text = "\n".join(f"- {issue}" for issue in primary_issues) if primary_issues else "- No specific issues identified"
-        recommendations_text = "\n".join(f"- {rec}" for rec in retry_recommendations) if retry_recommendations else "- Use standard extraction approach"
-        improvements_text = "\n".join(f"- {imp}" for imp in extraction_improvements) if extraction_improvements else "- Focus on core product fields"
-        refinements_text = "\n".join(f"- {ref}" for ref in search_refinements) if search_refinements else "- Use original search query"
+        # Optional guidance
+        issues = validation_feedback.get('primary_issues', []) or []
+        recommendations = validation_feedback.get('retry_recommendations', []) or []
+        refinements = validation_feedback.get('search_refinements', []) or []
 
+        feedback_hint = " ".join([
+            " ".join(issues[:3]),
+            " ".join(recommendations[:3]),
+            " ".join(refinements[:3]),
+        ]).strip()
+
+        names = self._tools_summary()
         task_description = f"""
-        Goal (retry #{attempt_number}): Extract product fields for "{product_query}" from {retailer} at {retailer_url}, applying prior feedback.
+        Retry #{attempt_number}: Confirm if {retailer} sells "{product_query}" using {names["product_tool"]}.
+        If purchasable, return minimal fields: name, url, price.
 
-        Feedback summary:
-        - Issues: {issues_text}
-        - Recommendations: {recommendations_text}
-        - Improvements: {improvements_text}
-        - Search refinements: {refinements_text}
+        Inputs: product_query, retailer, retailer_domain={retailer_domain}, retailer_url={retailer_url}, session_id={session_id}
 
-        Tools (order): Stagehand → SeleniumScrapingTool (fallback only if needed).
+        TOOL USAGE:
+        - Call {names["product_tool"]} with:
+          - product_query: "{product_query}"
+          - retailer: "{retailer}"
+          - retailer_domain: "{retailer_domain}"
+          - keywords: true
+          - search_instructions: "{feedback_hint} Allow keywords related to the product to be used in the search"
 
-        Procedure:
-        1) Navigate to {retailer_url}. If error/soft-404/404/5xx (“Looking for something?”, “Page not found”, “not a functioning page”), return products=[] and extraction_successful=false.
-        2) Apply the feedback above while classifying/searching:
-           - If not a product page, perform one on-site search for "{product_query}" (using refined terms if given).
-           - Open the best match; if none, return empty products.
-        3) Extract fields on product page and use the product page url for the url field. Prefer Stagehand extract; use Selenium only if observe/act is unreliable or the page is highly dynamic.
+        HINTS FROM FEEDBACK (optional context for better disambiguation): {feedback_hint} | Target URL: {retailer_url}
 
-        Constraints: one on-site search attempt; GBP pricing; direct product URL required.
+        DECISION:
+        - If the tool returns exists=false, output products=[] and extraction_successful=false.
+        - If exists=true, output a single product with fields name, url, price from the tool.
+
+        Constraints: 
+        - URLs must be direct product pages.
+        - Prices should be GBP when available.
 
         Output JSON only per contract below.
         """
@@ -295,8 +270,8 @@ class ExtractionAgent:
             {{
               "products": [
                 {{
-                  "url": "Direct product page url",
-                  "name": "Exact product name from site", 
+                  "url": "direct product page url",
+                  "name": "Exact product name", 
                   "price": "£XX.XX"
                 }}
               ],
@@ -309,19 +284,15 @@ class ExtractionAgent:
                 "retry_attempt": {attempt_number},
                 "feedback_applied": true,
                 "total_products_found": <number>,
-                "extraction_successful": <true/false>,
-                "improvements_made": [
-                  "List of specific improvements made based on feedback"
-                ]
+                "extraction_successful": <true/false>
               }}
             }}
 
             IMPORTANT:
             - Output JSON only, no wrappers or tags
-            - Address all validation feedback from the previous attempt
-            - If no errors occur, you may omit the "errors" key
-            - Ensure all URLs, names, and prices are accurately extracted
-            - Document what improvements were made based on the feedback
+            - If the tool returns exists=false, return products=[] and extraction_successful=false
+            - Ensure URL is a direct product page and price is GBP when available
+            - Handle any errors gracefully and include them in the errors array
             """,
                 output_pydantic=ExtractionResult
             )

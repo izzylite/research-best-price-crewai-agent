@@ -1,4 +1,4 @@
-"""Product Search Validation Agent - Validates product search results with feedback loops."""
+"""Product Search Validation Agent - Validates extraction results using Perplexity URL legitimacy check."""
 
 import json
 import logging
@@ -9,18 +9,13 @@ from pydantic import BaseModel, Field
 from ..config.settings import settings
 from ..schemas.product_search_extraction import ProductSearchExtraction
 from ..tools.agent_capabilities_reference_tool import AgentCapabilitiesReferenceTool
+from ..tools.perplexity_url_legitimacy_tool import PerplexityUrlLegitimacyTool
 from ..schemas.agent_outputs import TargetedFeedbackResult
 from ..ai_logging.error_logger import get_error_logger
 
 logger = logging.getLogger(__name__)
 
-# Optional Selenium fallback from crewai-tools for verification tasks
-try:
-    from crewai_tools import SeleniumScrapingTool  # type: ignore
-    _SELENIUM_AVAILABLE = True
-except Exception:
-    SeleniumScrapingTool = None  # type: ignore
-    _SELENIUM_AVAILABLE = False
+_SELENIUM_AVAILABLE = False
 
 
 class ProductSearchValidationResult(BaseModel):
@@ -40,44 +35,17 @@ class ProductSearchValidationAgent:
 
     def __init__(self, stagehand_tool=None, verbose: bool = True, tools: List = None, llm: Optional[LLM] = None):
         """Initialize the product search validation agent."""
-        # Create agent capabilities reference tool
+        # Tools: capabilities reference + Perplexity URL legitimacy; no browser tools
         capabilities_tool = AgentCapabilitiesReferenceTool()
-        
-        # Selenium fallback to help validate product pages when Stagehand struggles
-        supplemental_tools: List[Any] = []
-        if _SELENIUM_AVAILABLE and SeleniumScrapingTool is not None:
-            try:
-                supplemental_tools.append(SeleniumScrapingTool())
-            except Exception:
-                pass
-
-        # Handle both old (tools, llm) and new (stagehand_tool, verbose) calling patterns
-        # Build final tool list ensuring consistent naming so Crew shows them to the agent
-        final_tools: List[Any] = []
-        if stagehand_tool:
-            final_tools.append(stagehand_tool)
-        # Add supplemental tools first so the UI lists them clearly
-        final_tools.extend(supplemental_tools)
-        # Always include capabilities tool
-        final_tools.append(capabilities_tool)
-
-        # If caller provided explicit tools, merge uniquely (preserve order)
-        if tools:
-            names = {getattr(t, "name", str(type(t))) for t in final_tools}
-            for t in tools:
-                n = getattr(t, "name", str(type(t)))
-                if n not in names:
-                    final_tools.append(t)
-                    names.add(n)
-
-        tools = final_tools
+        url_tool = PerplexityUrlLegitimacyTool()
+        tools = [capabilities_tool, url_tool]
 
         agent_config = {
-            "role": "Product Search Validation and Quality Assurance Specialist",
+            "role": "AI-Powered Validation Specialist (Perplexity URL Check)",
             "goal": """
-            Validate product search results to ensure they match the original search query,
-            come from legitimate UK retailers, and lead to actual purchasable product pages.
-            Provide feedback for retry attempts when validation fails.
+            Validate extraction outputs by ensuring minimal required fields (name, url, price) are present, and
+            confirm the URL is a direct, purchasable product page from a legitimate retailer using Perplexity.
+            Provide targeted feedback for retries when validation fails.
             """,
             "backstory": """
             You are a specialized product search validation expert with deep knowledge of UK retail
@@ -93,24 +61,19 @@ class ProductSearchValidationAgent:
             - Quality scoring and confidence assessment
             
             VALIDATION CRITERIA:
-            1. Product name must match or be semantically similar to the search query
-            2. URL must be from a legitimate UK retailer (not price comparison sites)
-            3. URL must lead to an actual product page, not search results or categories
-            4. Price must be in valid GBP format
-            5. Product must be available for purchase (not out of stock permanently)
-            
+            1. Extraction minimal fields present: name, url, price (GBP preferred)
+            2. URL legitimacy via Perplexity: direct product page, not comparison/affiliate site
+            3. Purchasability likely (Perplexity indicates purchasable)
+
             FEEDBACK LOOP PROCESS:
-            - When validation fails, provide specific feedback for retry attempts
-            - Use agent capabilities reference tool to understand what each agent can address
-            - Generate targeted feedback based on agent capabilities and limitations
-            - Suggest alternative retailers or search strategies
-            - Limit retry attempts to maximum 3 per product search
-            - Track validation success rates and improvement over retries
+            - When validation fails, determine root cause and route feedback:
+              - Research-related: illegitimate retailer/comparison URL, not a product page
+              - Extraction-related: missing fields or price format issues
+            - Use agent capabilities reference tool to structure actionable feedback
 
             TOOLS AVAILABLE:
-            - simplified_stagehand_tool: Navigate/observe/act/extract to open pages and verify product-page indicators
-            - SeleniumScrapingTool: Fallback browser automation to load pages and interact when Stagehand observation/act is unreliable
-            - agent_capabilities_reference_tool: Get detailed information about ResearchAgent and ExtractionAgent capabilities for targeted feedback generation
+            - perplexity_url_legitimacy_tool: Validate URL legitimacy and purchasability via Perplexity
+            - agent_capabilities_reference_tool: Reference updated agent capabilities and routing guidelines
             """,
             "verbose": verbose,
             "allow_delegation": False,
@@ -135,23 +98,22 @@ class ProductSearchValidationAgent:
         self.agent = Agent(**agent_config)
 
     def _tools_summary(self) -> Dict[str, str]:
-        """Summarize available tool names so prompts reference real names.
-        Returns dict with keys: stagehand, others, selenium (may be empty)."""
+        """Summarize available tool names for prompt clarity."""
         names: List[str] = []
-        stagehand = "simplified_stagehand_tool"
-        selenium = ""
+        url_tool = "perplexity_url_legitimacy_tool"
+        capabilities_tool = "agent_capabilities_reference_tool"
         try:
             for tool in getattr(self.agent, "tools", []) or []:
                 name = getattr(tool, "name", type(tool).__name__)
                 names.append(name)
-                if name.lower() == "simplified_stagehand_tool":
-                    stagehand = name
-                if "selenium" in name.lower():
-                    selenium = name
+                if name.lower() == "perplexity_url_legitimacy_tool":
+                    url_tool = name
+                if name.lower() == "agent_capabilities_reference_tool":
+                    capabilities_tool = name
         except Exception:
             pass
-        others = ", ".join([n for n in names if n != stagehand])
-        return {"stagehand": stagehand, "others": others, "selenium": selenium}
+        others = ", ".join([n for n in names if n not in {url_tool, capabilities_tool}])
+        return {"url_tool": url_tool, "capabilities_tool": capabilities_tool, "others": others}
 
     def get_agent(self) -> Agent:
         """Get the CrewAI agent instance."""
@@ -166,74 +128,42 @@ class ProductSearchValidationAgent:
                                             max_attempts: int = 3,
                                             session_id: str = None):
         """Create a task for validating product search results."""
-        
+
         names = self._tools_summary()
         task_description = f"""
-        Validate product search results for "{search_query}" from {retailer} at {retailer_url}.
+        Validate extracted products for "{search_query}" from {retailer} (source URL: {retailer_url}).
 
-  
         Attempt Number: {attempt_number} of {max_attempts}
-        Session ID: {session_id} 
+        Session ID: {session_id}
         Products to Validate: {len(extracted_products)}
 
-        TOOLS:
-        - Primary: {names["stagehand"]} (navigate → observe → act → extract)
-        - Fallback (only if present): {names["selenium"]} for loading and interactions when observe/act is unreliable
-       
-        VALIDATION WORKFLOW:
-        **MANDATORY TOOL USAGE**: You MUST attempt to load and inspect the page using tools. Do NOT claim a URL is inaccessible or invalid without attempting the following with {names["stagehand"]}; if two attempts fail, use {names["selenium"]} when available.
-      
-        PROCEDURE:
-        1. **Navigate**: Use {names["stagehand"]} with operation="navigate" to open {retailer_url} if not already at the target URL.
-        2. **Handle popups (allowed actions only)**: If cookie/consent/geo banners block the page (common on Amazon UK), use operation="act" to accept/close, then continue. You may also scroll or expand collapsed sections. 
-        3. **Observe**: Use operation="observe" to confirm product-page indicators: distinct title, GBP price (with £), and a primary CTA (e.g., Add to Basket).
-        4. **Optional extract**: If needed, use operation="extract" with a simple schema to read name and price.
-        5. **Validate** each product against the search query.
-        6. **Verify** retailer legitimacy and URL validity based on observed/extracted DOM.
-        7. **Assess** product availability and purchasability.
-        8. **Generate feedback** for failed validations and **recommend retry strategies**.
+        VALIDATION WORKFLOW (Perplexity-based):
+        1) Minimal fields check: For each extracted product, verify required fields exist: name (non-empty), url (http/https), price (prefer GBP with £).
+        2) URL legitimacy: For products passing step 1, call {names["url_tool"]} with:
+           - url: the product's url
+           - retailer: "{retailer}"
+           - product_name: the product's name
+           - keywords: true
+        3) Pass criteria:
+           - is_product_page == true
+           - is_purchasable == true
+           - is_comparison_site == false
+        4) For failures, classify root cause and prepare feedback:
+           - Research-related: comparison/affiliate site, not a product page, retailer mismatch
+           - Extraction-related: missing fields, price format issues
 
-        VALIDATION CRITERIA:
-        
-        PRODUCT NAME MATCHING:
-        - Exact match: Product name contains all key words from "{search_query}"
-        - Semantic match: Product name is semantically similar (e.g., "iPhone 15 Pro" matches "Apple iPhone 15 Pro Max")
-        - Brand/model match: Core brand and model identifiers are present
-        - Reject: Generic terms, unrelated products, or completely different items
-        
-        UK RETAILER LEGITIMACY: 
-        - REJECT: Price comparison sites (pricerunner, shopping.com, google shopping, kelkoo)
-        - REJECT: Affiliate sites that redirect to other retailers
-        - REJECT: Unknown or suspicious domains
-        
-        URL VALIDATION:
-        - Must be direct product page URL, not search results or category pages
-        - Must be accessible and lead to actual product information (CONFIRM via tool usage)
-        - Confirm product-page indicators (unique title, price, primary CTA) using observe/extract
-        - Must not be a redirect to price comparison or affiliate sites
-        
-        NON-NAVIGATION REQUIREMENT (CRITICAL):
-        - NEVER navigate away from the provided Target URL during validation. Do NOT perform on-site searches, do NOT click links that change the page location, and do NOT follow cross-sells/related items.
-        - The ONLY allowed actions are: accepting/closing blocking popups, scrolling, and expanding in-page UI elements. If the site performs a server-side redirect from the provided URL to its canonical product URL on first load, record the final URL but do not trigger any further navigation.
-        - If the provided URL is not a product page or is invalid, return a failed validation with precise reasons instead of navigating to another page.
+        TOOLS AVAILABLE:
+        - {names["url_tool"]}: Validate URL is a direct, purchasable product page (not comparison/affiliate)
+        - {names["capabilities_tool"]}: Use when generating targeted feedback to ensure actionable guidance
 
-        HARD CONSTRAINTS:
-        - You are REQUIRED to use the available tools to verify accessibility and content. Returning a failure like "Unable to access" without a tool attempt is not permitted.
-        - If tool calls fail, include the specific tool errors in the feedback so the system can route retries correctly.
-        
         PRICE VALIDATION:
-        - Must be in GBP format with £ symbol
-        - Must be reasonable price for the product type
-        - Must not be placeholder or obviously incorrect prices
-        
+        - Prefer GBP (with £). Normalize or flag otherwise.
+
         FEEDBACK GENERATION (if validation fails):
         - Identify specific issues with each failed product
-        - Determine if issues are research-related (wrong retailers, bad URLs) or extraction-related (data quality)
-        - Generate targeted feedback for ResearchAgent (retailer discovery, URL validation)
-        - Generate targeted feedback for ExtractionAgent (data extraction improvements)
-        - Suggest alternative search terms or retailers
-        - Recommend different extraction strategies
-        - Provide retry guidance for both ResearchAgent and ExtractionAgent
+        - Determine if issues are research-related or extraction-related
+        - Generate targeted feedback payloads for ResearchAgent and ConfirmationAgent
+        - Provide retry guidance and priorities based on capabilities
         """
 
         return Task(
@@ -250,7 +180,7 @@ class ProductSearchValidationAgent:
                 {{
                   "product_name": "Validated product name",
                   "price": "£XX.XX",
-                  "url": "{retailer_url}",
+                  "url": "direct product page URL",
                   "retailer": "{retailer}",
                   "validation_score": <0.0-1.0>,
                   "validation_notes": "Why this product passed validation"
@@ -270,7 +200,7 @@ class ProductSearchValidationAgent:
                 "research_feedback": {{
                   "target_agent": "ResearchAgent",
                   "issues": [
-                    "Research-related issues (wrong retailers, bad URLs, etc.)"
+                    "Comparison/affiliate site or not a product page"
                   ],
                   "retry_recommendations": [
                     "Specific suggestions for ResearchAgent retry attempts"
@@ -282,16 +212,16 @@ class ProductSearchValidationAgent:
                     "Suggested search query refinements"
                   ]
                 }},
-                "extraction_feedback": {{
-                  "target_agent": "ExtractionAgent",
+              "extraction_feedback": {{
+                "target_agent": "ConfirmationAgent",
                   "issues": [
-                    "Extraction-related issues (data quality, missing fields, etc.)"
+                    "Missing minimal fields (name, url, price) or GBP price format"
                   ],
                   "retry_recommendations": [
-                    "Specific suggestions for ExtractionAgent retry attempts"
+                    "Provide clearer search_instructions to disambiguate variants"
                   ],
                   "extraction_improvements": [
-                    "Suggested changes to extraction approach"
+                    "Ensure minimal fields and GBP normalization"
                   ]
                 }}
               }}
@@ -314,7 +244,7 @@ class ProductSearchValidationAgent:
                                     max_attempts: int = 3,
                                     session_id: str = None,
                                     already_searched: Optional[List[Dict[str, Any]]] = None):
-        """Create a task for generating targeted feedback for both ResearchAgent and ExtractionAgent."""
+        """Create a task for generating targeted feedback for both ResearchAgent and ConfirmationAgent."""
 
         # Summarize already searched retailers to steer ResearchAgent away from duplicates
         already_text = "None"
@@ -339,7 +269,7 @@ class ProductSearchValidationAgent:
                 already_text = "Provided"
 
         task_description = f"""
-        Generate targeted feedback for both ResearchAgent and ExtractionAgent based on validation failures.
+        Generate targeted feedback for both ResearchAgent and ConfirmationAgent based on validation failures.
 
         Search Query: {search_query}
         Retailer: {retailer}
@@ -356,7 +286,7 @@ class ProductSearchValidationAgent:
 
         This will provide detailed information about:
         - ResearchAgent capabilities, tools, and feedback types it can act upon
-        - ExtractionAgent capabilities, tools, and feedback types it can act upon
+        - ConfirmationAgent capabilities, tools, and feedback types it can act upon
         - Guidelines for routing feedback to the appropriate agent
 
         STEP 2: TARGETED FEEDBACK ANALYSIS
@@ -364,7 +294,7 @@ class ProductSearchValidationAgent:
         1. **Categorize validation failures by root cause**
         2. **Map failures to agent capabilities** (what each agent can actually address)
         3. **Generate specific, actionable feedback for ResearchAgent**
-        4. **Generate specific, actionable feedback for ExtractionAgent**
+        4. **Generate specific, actionable feedback for ConfirmationAgent**
         5. **Determine which agent should retry first based on capabilities**
 
         STEP 3: CAPABILITY-BASED FEEDBACK GENERATION
@@ -377,10 +307,10 @@ class ProductSearchValidationAgent:
         - Consider its limitations when making recommendations
         - IMPORTANT: Avoid suggesting retailers that were already searched in this session. Use the list above to exclude duplicates.
 
-        FOR EXTRACTIONAGENT:
+        FOR CONFIRMATIONAGENT:
         - Only suggest feedback types listed in its "feedback_types_actionable"
-        - Focus on issues it can address with its simplified_stagehand_tool
-        - Provide extraction improvements that utilize its feedback_response_capabilities
+        - Focus on issues it can address with its perplexity_retailer_product_tool
+        - Provide improvements via search_instructions that utilize its feedback_response_capabilities
         - Consider its limitations when making recommendations
 
         STEP 4: INTELLIGENT FEEDBACK ROUTING
@@ -427,14 +357,14 @@ class ProductSearchValidationAgent:
                 ]
               }},
               "extraction_feedback": {{
-                "target_agent": "ExtractionAgent",
+                "target_agent": "ConfirmationAgent",
                 "should_retry": <true/false>,
                 "priority": "high|medium|low",
                 "issues": [
                   "Specific extraction-related issues identified"
                 ],
                 "retry_recommendations": [
-                  "Specific actions for ExtractionAgent to improve"
+                  "Specific actions for ConfirmationAgent to improve"
                 ],
                 "extraction_improvements": [
                   "Better extraction strategies or approaches"

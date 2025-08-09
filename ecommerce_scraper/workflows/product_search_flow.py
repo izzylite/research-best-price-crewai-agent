@@ -13,7 +13,7 @@ from crewai.flow.flow import listen, start, router
 from rich.console import Console
 
 from ..agents.research_agent import ResearchAgent
-from ..agents.extraction_agent import ExtractionAgent
+from ..agents.extraction_agent import ConfirmationAgent
 from ..agents.product_search_validation_agent import ProductSearchValidationAgent
 from ..schemas.product_search_result import ProductSearchResult, ProductSearchItem
 from ..tools.simplified_stagehand_tool import SimplifiedStagehandTool
@@ -224,10 +224,10 @@ class ProductSearchFlow(Flow[ProductSearchState]):
             )
         return self._research_agent
     
-    def _get_extraction_agent(self) -> ExtractionAgent:
-        """Get or create ExtractionAgent instance."""
+    def _get_extraction_agent(self) -> ConfirmationAgent:
+        """Get or create ConfirmationAgent instance."""
         if self._extraction_agent is None:
-            self._extraction_agent = ExtractionAgent(
+            self._extraction_agent = ConfirmationAgent(
                 stagehand_tool=self._get_stagehand_tool(),
                 verbose=self.verbose
             )
@@ -384,7 +384,7 @@ class ProductSearchFlow(Flow[ProductSearchState]):
             self._stagehand_tool = None
 
     def _generate_targeted_feedback(self, validation_data: Dict[str, Any]):
-        """Generate targeted feedback for both ResearchAgent and ExtractionAgent."""
+        """Generate targeted feedback for both ResearchAgent and ConfirmationAgent."""
         try:
             current_retailer = self.state.retailers[self.state.current_retailer_index]
             retailer_name = current_retailer.get('vendor', 'Unknown')
@@ -577,8 +577,9 @@ class ProductSearchFlow(Flow[ProductSearchState]):
                 return {"action": "error", "error": research_result.get("error")}
             
             # Check if we have retailers to search
-            if not self.state.retailers or self.state.current_retailer_index >= len(self.state.retailers):
-                return {"action": "finalize", "reason":  "no_more_retailers" if self.state.current_retailer_index >= len(self.state.retailers) else "empty_retailers"}
+            hasMore = self.has_more_retailers()
+            if not self.state.retailers or not hasMore:
+                return {"action": "finalize", "reason":  "no_more_retailers" if not hasMore else "empty_retailers"}
             
             current_retailer = self.state.retailers[self.state.current_retailer_index]
             retailer_name = current_retailer.get('vendor', 'Unknown')
@@ -642,10 +643,10 @@ class ProductSearchFlow(Flow[ProductSearchState]):
         try:
             # Handle terminal/empty cases from extraction safely before any indexing
             if extraction_result.get("action") == "finalize" and extraction_result.get("reason") == "no_more_retailers":
-                # Mark as exhausted so router logic can decide next step (e.g., retry research)
+                # We have exhausted the retailer list; finalize immediately
                 self.state.current_retailer_products = []
                 self.state.current_retailer_index = len(self.state.retailers)
-                return {"action": "route_after_validation", "validation_passed": False}
+                return {"action": "finalize", "reason": "no_more_retailers"}
             # If no retailers were found and we still have retries left, let the ValidationAgent
             # generate targeted feedback for a research-first retry.
             if extraction_result.get("action") == "finalize" and extraction_result.get("reason") == "empty_retailers":
