@@ -4,7 +4,8 @@ import re
 from typing import Optional
 from urllib.parse import urlparse, parse_qs, urljoin
 
-from ..config.sites import get_site_config
+def _noop_get_site_config(_url: str):
+    return None
 
 
 def is_valid_url(url: str) -> bool:
@@ -79,7 +80,7 @@ def is_product_url(url: str) -> bool:
         True if URL appears to be a product page
     """
     # Get site configuration
-    site_config = get_site_config(url)
+    site_config = _noop_get_site_config(url)
     
     if site_config:
         # Check against site-specific product URL patterns
@@ -110,7 +111,7 @@ def is_category_url(url: str) -> bool:
         True if URL appears to be a category page
     """
     # Get site configuration
-    site_config = get_site_config(url)
+    site_config = _noop_get_site_config(url)
     
     if site_config:
         # Check against site-specific category URL patterns
@@ -143,7 +144,7 @@ def detect_vendor(url: str) -> str:
         Vendor identifier
     """
     # Get site configuration
-    site_config = get_site_config(url)
+    site_config = _noop_get_site_config(url)
     
     if site_config:
         return site_config.name
@@ -167,7 +168,7 @@ def extract_category_name(url: str) -> str:
         Category name
     """
     # Get site configuration
-    site_config = get_site_config(url)
+    site_config = _noop_get_site_config(url)
     
     if site_config and site_config.category_name_extractor:
         # Use site-specific extractor

@@ -3,8 +3,7 @@
 from typing import List, Optional, Dict, Any
 from crewai import Agent, LLM
 from ..config.settings import settings
-from ..config.settings import settings
-from ..config.sites import get_site_config_by_vendor, SiteConfig
+from ..config.settings import settings 
 from ..schemas.agent_outputs import ExtractionResult
 from ..ai_logging.error_logger import get_error_logger
 

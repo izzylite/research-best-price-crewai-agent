@@ -14,7 +14,7 @@ class ProductSearchExtraction(BaseModel):
     url: str = Field(..., description="Direct URL to the product page")
     
     # Context fields
-    retailer: str = Field(..., description="Retailer name (e.g., 'ASDA', 'Tesco')")
+    retailer: str = Field(..., description="Retailer name (e.g., 'Amazon')")
     extracted_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), description="When the data was extracted")
     
     @field_validator('product_name')

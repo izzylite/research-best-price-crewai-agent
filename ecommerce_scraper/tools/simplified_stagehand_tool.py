@@ -30,7 +30,7 @@ class SimplifiedStagehandInput(BaseModel):
         default=None,
         description="Instruction for extract/observe operations"
     )
-    schema: Optional[Dict[str, Any]] = Field(
+    extraction_schema: Optional[Dict[str, Any]] = Field(
         default=None,
         description="Custom Pydantic schema definition for extract operations (JSON format)"
     )
@@ -79,7 +79,7 @@ class SimplifiedStagehandTool(BaseTool):
     {
       "operation": "extract",
       "instruction": "Extract product information",
-      "schema": {
+      "extraction_schema": {
         "fields": {
           "name": "str",
           "image": "optional_url",
@@ -204,10 +204,12 @@ class SimplifiedStagehandTool(BaseTool):
                 asyncio.set_event_loop(loop)
                 run_async = loop.run_until_complete
 
-            # Dispatch to appropriate method
+            # Dispatch to appropriate method using a single session fetch per call
+            # to avoid racing multiple initializations.
             if operation == "extract":
                 instruction = kwargs.get("instruction", "")
-                schema = kwargs.get("schema")
+                # Support both 'schema' and 'extraction_schema' for backward compatibility
+                schema = kwargs.get("extraction_schema") or kwargs.get("schema")
                 if not instruction:
                     raise ValueError("extract operation requires 'instruction' parameter")
                 return run_async(self.extract(instruction, schema))
@@ -222,12 +224,7 @@ class SimplifiedStagehandTool(BaseTool):
             elif operation == "observe":
                 instruction = kwargs.get("instruction", "")
                 return_action = kwargs.get("return_action", False)
-                self.logger.info(f"observe operation - kwargs={kwargs}")
-                self.logger.info(f"observe operation - instruction='{instruction}' (type: {type(instruction)}, len: {len(instruction) if instruction else 'N/A'})")
-                self.logger.info(f"observe operation - return_action={return_action}")
                 if not instruction:
-                    self.logger.error(f"observe operation failed - instruction is empty or None")
-                    self.logger.error(f"observe operation failed - kwargs keys: {list(kwargs.keys())}")
                     raise ValueError("observe operation requires 'instruction' parameter")
                 return run_async(self.observe(instruction, return_action))
 
@@ -241,8 +238,19 @@ class SimplifiedStagehandTool(BaseTool):
                 raise ValueError(f"Unknown operation: {operation}. Supported: extract, act, observe, navigate")
 
         except Exception as e:
-            self.logger.error(f"Operation execution failed: {e}")
-            return f"Error: {str(e)}"
+            error_msg = str(e)
+            # Provide more specific error messages for common issues
+            if "browserbase_api_key" in error_msg.lower() or "browserbase_project_id" in error_msg.lower():
+                error_msg = "Browserbase credentials missing. Please set BROWSERBASE_API_KEY and BROWSERBASE_PROJECT_ID environment variables."
+            elif "openai_api_key" in error_msg.lower():
+                error_msg = "OpenAI API key missing. Please set OPENAI_API_KEY environment variable."
+            elif "nonetype object has no attribute 'stream'" in error_msg.lower():
+                error_msg = "Browser session connection lost. This will be automatically retried."
+            elif "httpx.readerror" in error_msg.lower():
+                error_msg = "Network connection error. This will be automatically retried."
+
+            self.logger.error(f"Operation execution failed: {error_msg}")
+            return f"Error: {error_msg}"
 
     # Tool configuration
     session_id: Optional[str] = Field(default=None, description="Browserbase session ID for session reuse")
@@ -267,19 +275,37 @@ class SimplifiedStagehandTool(BaseTool):
     @property
     def logger(self):
         """Deprecated: info/debug logging removed; keep for compatibility."""
-        class _Null:
+        # Create a simple object that delegates error logging to the error logger
+        class _NullLogger:
+            def __init__(self, tool_instance):
+                self.tool_instance = tool_instance
+
             def info(self, *a, **k):
                 pass
             def debug(self, *a, **k):
                 pass
             def warning(self, *a, **k):
                 pass
-        return _Null()
+            def error(self, *a, **k):
+                # Delegate error logging to the actual error logger
+                if hasattr(self.tool_instance, '_error_logger') and self.tool_instance._error_logger:
+                    self.tool_instance._error_logger.error(*a, **k)
+                else:
+                    # Fallback to print if no logger available
+                    print(f"ERROR: {' '.join(str(arg) for arg in a)}")
+
+        return _NullLogger(self)
 
 
     
     async def _get_stagehand(self):
-        """Get or create Stagehand instance using official v0.5.0 API."""
+        """Get or create Stagehand instance using official v0.5.0 API.
+
+        Note: We avoid aggressive session re-validation here because false negatives can
+        cause unnecessary re-initializations (and thus multiple sessions). Session health
+        is handled by _run_with_session_retry on real failures.
+        """
+        # Initialize only when we don't have a session yet
         if self._stagehand is None or not self._session_initialized:
             try:
                 # Import official Stagehand v0.5.0
@@ -342,9 +368,18 @@ class SimplifiedStagehandTool(BaseTool):
                 # Create Stagehand instance with config and model API key
                 self._stagehand = Stagehand(stagehand_config, model_api_key=model_api_key)
 
-                # Initialize following official pattern
-                await self._stagehand.init()
-                self._session_initialized = True
+                # Initialize following official pattern with timeout and retry
+                max_init_attempts = 3
+                for attempt in range(max_init_attempts):
+                    try:
+                        await self._stagehand.init()
+                        self._session_initialized = True
+                        break
+                    except Exception as init_error:
+                        if attempt == max_init_attempts - 1:
+                            raise init_error
+                        self._error_logger.warning(f"Stagehand init attempt {attempt + 1} failed: {init_error}. Retrying...")
+                        await asyncio.sleep(2)  # Wait before retry
 
                 # Info logging removed
 
@@ -371,7 +406,19 @@ class SimplifiedStagehandTool(BaseTool):
                 raise Exception(f"Failed to initialize Stagehand v0.5.0: {e}")
 
         return self._stagehand
-    
+
+    async def _validate_session(self) -> bool:
+        """Conservative session check to minimize false negatives.
+
+        We only verify that a Stagehand instance exists, was initialized, and exposes a page.
+        Any deeper checks are performed lazily in _run_with_session_retry, which can safely
+        reinitialize the session on real failures.
+        """
+        try:
+            return bool(self._stagehand) and bool(self._session_initialized) and bool(getattr(self._stagehand, 'page', None))
+        except Exception:
+            return False
+
     async def extract(self, instruction: str, schema: Optional[Dict[str, Any]] = None) -> str:
         """
         Extract structured data using schema-based extraction with flexible schemas.
@@ -434,11 +481,12 @@ class SimplifiedStagehandTool(BaseTool):
                 extraction_schema = self._create_default_schema()
 
             async def op(sh):
-                return await sh.page.extract(
-                    instruction,
-                    schema=extraction_schema
-                )
+                # Ensure page exists; if not, trigger a controlled reinit via retry wrapper
+                if not getattr(sh, 'page', None):
+                    raise RuntimeError("stagehand page missing before extract")
+                return await sh.page.extract(instruction, schema=extraction_schema)
 
+            # Run with retry: will re-init only on real session-closed errors
             extraction = await self._run_with_session_retry(op, "extract")
 
             # Handle the extraction result
@@ -452,6 +500,20 @@ class SimplifiedStagehandTool(BaseTool):
             return result
 
         except Exception as error:
+            # If Stagehand failed to match schema, attempt a softer retry using default schema once
+            msg = str(error)
+            if "response did not match schema" in msg.lower() or "no object generated" in msg.lower():
+                try:
+                    extraction_schema = self._create_default_schema()
+                    async def op2(sh):
+                        if not getattr(sh, 'page', None):
+                            raise RuntimeError("stagehand page missing before extract")
+                        return await sh.page.extract(instruction, schema=extraction_schema)
+                    extraction = await self._run_with_session_retry(op2, "extract")
+                    result_data = self._process_extraction_result(extraction)
+                    return json.dumps(result_data, indent=2, default=str)
+                except Exception:
+                    pass
             error_msg = f"Failed to extract content: {str(error)}"
             self._error_logger.error(error_msg, exc_info=True)
             raise Exception(error_msg)
@@ -531,8 +593,6 @@ class SimplifiedStagehandTool(BaseTool):
             name: str
             price: str
             url: Optional[str] = None
-            image: Optional[str] = None
-            description: Optional[str] = None
 
         class ProductList(BaseModel):
             products: List[Product]
@@ -613,10 +673,12 @@ class SimplifiedStagehandTool(BaseTool):
             # Info logging removed
 
             async def op(sh):
-                return await sh.page.act({
-                    "action": action,
-                    **({"variables": variables} if variables else {})
-                })
+                if not getattr(sh, 'page', None):
+                    raise RuntimeError("stagehand page missing before act")
+                payload = {"action": action}
+                if variables:
+                    payload["variables"] = variables
+                return await sh.page.act(payload)
 
             await self._run_with_session_retry(op, "act")
             
@@ -647,6 +709,8 @@ class SimplifiedStagehandTool(BaseTool):
             # Official v0.5.0 API pattern: Simple string parameter
             # Based on our successful test: await page.observe(instruction)
             async def op(sh):
+                if not getattr(sh, 'page', None):
+                    raise RuntimeError("stagehand page missing before observe")
                 return await sh.page.observe(instruction)
 
             observations = await self._run_with_session_retry(op, "observe")
@@ -679,6 +743,8 @@ class SimplifiedStagehandTool(BaseTool):
 
             async def op(sh):
                 # Direct API call following official pattern (Python naming convention)
+                if not getattr(sh, 'page', None):
+                    raise RuntimeError("stagehand page missing before navigate")
                 await sh.page.goto(url, wait_until="domcontentloaded")
                 return sh
 
@@ -730,9 +796,26 @@ class SimplifiedStagehandTool(BaseTool):
             or "execution context was destroyed" in msg
             # Additional transient/network/session failure patterns observed in logs
             or "httpx.readerror" in msg
-            or "noneype object has no attribute 'stream'" in msg
+            or "httpx.readtimeout" in msg
+            or "httpx.connecterror" in msg
+            or "httpx.networkerror" in msg
             or "nonetype object has no attribute 'stream'" in msg
+            or "'nonetype' object has no attribute 'stream'" in msg
+            or "connection broken" in msg
+            or "connection reset" in msg
+            or "connection aborted" in msg
+            or "session is closed" in msg
+            or "session closed" in msg
         )
+
+    def _is_transient_navigation_error(self, error: Exception) -> bool:
+        """Detect transient errors caused by in-flight navigations where the
+        execution context gets destroyed briefly. These are often resolved by a short wait and retry
+        without requiring a full session reinitialization."""
+        try:
+            return "execution context was destroyed" in str(error).lower()
+        except Exception:
+            return False
 
     async def _run_with_session_retry(self, op: Callable[[Any], Awaitable[Any]], op_name: str):
         """Run an operation with a one-time session reinitialization on closed-session errors.
@@ -744,6 +827,23 @@ class SimplifiedStagehandTool(BaseTool):
             sh = await self._get_stagehand()
             return await op(sh)
         except Exception as first_error:
+            # First, handle transient navigation/context errors with a soft retry using the same session
+            if self._is_transient_navigation_error(first_error):
+                try:
+                    await asyncio.sleep(1.0)
+                    return await op(sh)
+                except Exception as second_error:
+                    first_error = second_error
+            # Treat missing page as a transient closed-session scenario and retry once
+            if isinstance(first_error, RuntimeError) and "stagehand page missing" in str(first_error).lower():
+                if self._session_reinit_count == 0:
+                    try:
+                        await self.close()
+                    except Exception:
+                        pass
+                    self._session_reinit_count = 1
+                    sh2 = await self._get_stagehand()
+                    return await op(sh2)
             if self._is_session_closed_error(first_error):
                 if self._session_reinit_count == 0:
                     self._error_logger.error(
@@ -761,10 +861,10 @@ class SimplifiedStagehandTool(BaseTool):
                     return await op(sh2)
                 else:
                     self._error_logger.error(
-                        f"{op_name}: Session closed again after one retry. Exiting.",
+                        f"{op_name}: Session closed again after one retry.",
                         exc_info=True,
                     )
-                    import sys
-                    raise SystemExit(1)
+                    # Bubble up the error to allow caller to decide instead of exiting the process
+                    raise first_error
             # Not a session-closed error; re-raise
             raise

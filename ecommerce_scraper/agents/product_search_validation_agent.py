@@ -201,9 +201,7 @@ class ProductSearchValidationAgent:
         - Brand/model match: Core brand and model identifiers are present
         - Reject: Generic terms, unrelated products, or completely different items
         
-        UK RETAILER LEGITIMACY:
-        - ACCEPT: asda.com, tesco.com, waitrose.com, sainsburys.co.uk, amazon.co.uk, ebay.co.uk, 
-                 argos.co.uk, currys.co.uk, johnlewis.com, next.co.uk, marksandspencer.com, etc.
+        UK RETAILER LEGITIMACY: 
         - REJECT: Price comparison sites (pricerunner, shopping.com, google shopping, kelkoo)
         - REJECT: Affiliate sites that redirect to other retailers
         - REJECT: Unknown or suspicious domains

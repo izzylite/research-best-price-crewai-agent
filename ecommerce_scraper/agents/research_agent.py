@@ -147,7 +147,9 @@ class ResearchAgent:
                                              validation_feedback: Dict[str, Any],
                                              attempt_number: int = 1,
                                              max_retailers: int = 5,
-                                             session_id: str = None):
+                                             session_id: str = None,
+                                             exclude_urls: Optional[List[str]] = None,
+                                             exclude_domains: Optional[List[str]] = None):
         """Create a task for feedback-enhanced retailer research based on validation feedback."""
         from crewai import Task
 
@@ -164,6 +166,12 @@ class ResearchAgent:
         alternatives_text = "\n".join(f"- {alt}" for alt in alternative_retailers) if alternative_retailers else "- Focus on major UK retailers"
         refinements_text = "\n".join(f"- {ref}" for ref in search_refinements) if search_refinements else "- Use original search query"
 
+        # Build exclusion text for prompt clarity and instruct tool usage with explicit args
+        exclude_urls = exclude_urls or []
+        exclude_domains = exclude_domains or []
+        exclude_urls_text = "\n".join(f"- {u}" for u in exclude_urls) if exclude_urls else "- None"
+        exclude_domains_text = "\n".join(f"- {d}" for d in exclude_domains) if exclude_domains else "- None"
+
         task_description = f"""
         Conduct improved retailer research for "{product_query}" using validation feedback to address previous issues.
         This is retry attempt #{attempt_number} with targeted feedback to improve research quality.
@@ -173,6 +181,12 @@ class ResearchAgent:
         Max Retailers: {max_retailers}
         Retry Attempt: {attempt_number}
         Session ID: {session_id}
+
+        Exclude the following previously seen items (do NOT return these again):
+        URLs already seen:
+        {exclude_urls_text}
+        Domains already seen:
+        {exclude_domains_text}
 
         **VALIDATION FEEDBACK FROM PREVIOUS ATTEMPT:**
 
@@ -222,6 +236,8 @@ class ResearchAgent:
         - product_query: "{product_query}"
         - max_retailers: {max_retailers}
         - search_instructions: [the enhanced instructions built from feedback above]
+        - exclude_urls: [exact URLs to exclude]
+        - exclude_domains: [domains to exclude]
 
         IMPORTANT: If the validation feedback includes a list of already searched retailers/domains, exclude those from the new search. Do not return duplicates.
 

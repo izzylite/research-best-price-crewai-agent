@@ -112,76 +112,12 @@ class PopupHandler:
         
         4. VERIFY main content is accessible before proceeding
         5. If popups persist, try alternative dismiss strategies
-        6. Wait 2-3 seconds between attempts
-        7. CRITICAL: Check current URL - if on login.asda.com or similar, navigate back to product page
+        6. Wait 2-3 seconds between attempts 
         8. AVOID footer elements - only interact with modal dialogs and overlay popups
         9. If no actual popups are found, proceed to next step (don't click random links)
         """
     
-    @staticmethod
-    def get_vendor_specific_instructions(vendor: str) -> str:
-        """Get vendor-specific popup handling instructions."""
-        vendor_instructions = {
-            "asda": """
-            ASDA-specific popup handling:
-            - Look for privacy dialog with "Your privacy is important to us" text
-            - Click "I Accept" button (not just "Accept")
-            - Handle location prompts for delivery areas
-            - Dismiss promotional banners for weekly offers
-            """,
-            "tesco": """
-            TESCO-specific popup handling:
-            - Cookie consent banner with "Accept All" button
-            - Clubcard signup prompts - click "Not Now" or "Skip"
-            - Age verification for alcohol - click "Yes" or enter age
-            - Delivery location selection - choose UK postcode area
-            """,
-            "waitrose": """
-            WAITROSE-specific popup handling:
-            - Newsletter signup overlays - click "No Thanks"
-            - Location-based delivery prompts - select area or skip
-            - Cookie policy banners - click "Accept"
-            - Partnership card prompts - dismiss if not needed
-            """,
-            "next": """
-            NEXT-specific popup handling:
-            - Newsletter subscription overlays - click "Close" or "X"
-            - Size guide popups - dismiss if not needed
-            - Cookie consent banners - click "Accept All"
-            - Mobile app prompts - click "Continue in Browser"
-            """,
-            "primark": """
-            PRIMARK-specific popup handling:
-            - Cookie consent with "Accept" button
-            - Newsletter popups - click "No Thanks"
-            - Store locator prompts - dismiss if not needed
-            - Promotional offer overlays - click "Close"
-            """,
-            "mamas_papas": """
-            MAMAS & PAPAS-specific popup handling:
-            - Newsletter signup - click "No Thanks" or "Skip"
-            - Cookie consent - click "Accept All"
-            - Age-appropriate product warnings - acknowledge
-            - Delivery information popups - dismiss or continue
-            """,
-            "thetoyshop": """
-            THE TOY SHOP-specific popup handling:
-            - Age verification for toy safety - confirm appropriate age
-            - Newsletter signup - click "Maybe Later"
-            - Cookie consent - click "Accept"
-            - Promotional toy offers - dismiss if not needed
-            """,
-            "costco": """
-            COSTCO-specific popup handling:
-            - Membership login prompts - click "Continue as Guest"
-            - Location selection for warehouse - choose UK
-            - Cookie consent - click "Accept All"
-            - Bulk purchase notifications - acknowledge
-            """
-        }
-        
-        return vendor_instructions.get(vendor.lower(), "No specific instructions available for this vendor.")
-    
+  
     @staticmethod
     def create_popup_dismissal_command(popup_type: str) -> str:
         """Create a Stagehand command for dismissing a specific popup type."""

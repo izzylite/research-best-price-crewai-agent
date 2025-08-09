@@ -36,6 +36,8 @@ class RetailerResearchInput(BaseModel):
     product_query: str = Field(..., description="Specific product to search for (e.g., 'iPhone 15 Pro', 'Samsung Galaxy S24')")
     max_retailers: int = Field(5, description="Maximum number of retailers to find")
     search_instructions: Optional[str] = Field(None, description="Optional enhanced search instructions based on feedback (e.g., 'Focus on major UK supermarkets, avoid price comparison sites')")
+    exclude_urls: List[str] = Field(default_factory=list, description="Exact product URLs that must be excluded from results")
+    exclude_domains: List[str] = Field(default_factory=list, description="Retailer domains that must be excluded from results (e.g., 'example.com')")
     
     
 
@@ -79,7 +81,9 @@ class PerplexityRetailerResearchTool(BaseTool):
         self,
         product_query: str,
         max_retailers: int = 5,
-        search_instructions: Optional[str] = None
+        search_instructions: Optional[str] = None,
+        exclude_urls: Optional[List[str]] = None,
+        exclude_domains: Optional[List[str]] = None,
     ) -> str:
         """
         Research UK retailers that sell the specified product.
@@ -101,9 +105,9 @@ class PerplexityRetailerResearchTool(BaseTool):
             if not self._api_key:
                 return self._fallback_retailer_result(product_query, max_retailers)
 
-            # Build research prompt (now uses search_instructions if provided)
+            # Build research prompt (now uses search_instructions and explicit exclusions if provided)
             prompt = self._build_retailer_research_prompt(
-                product_query, max_retailers, search_instructions
+                product_query, max_retailers, search_instructions, exclude_urls or [], exclude_domains or []
             )
 
             # Call Perplexity API
@@ -118,6 +122,34 @@ class PerplexityRetailerResearchTool(BaseTool):
                 max_retailers
             )
 
+            # Enforce exclusions defensively even if the model ignores the prompt
+            try:
+                seen_urls = set(exclude_urls or [])
+                seen_domains = set(exclude_domains or [])
+                retailers_list = structured_result.get("retailers", []) or []
+                if seen_urls or seen_domains:
+                    from urllib.parse import urlparse
+                    filtered = []
+                    for r in retailers_list:
+                        url = (r or {}).get("url") or ""
+                        if not isinstance(url, str) or not url:
+                            filtered.append(r)
+                            continue
+                        if url in seen_urls:
+                            continue
+                        try:
+                            netloc = urlparse(url).netloc
+                        except Exception:
+                            netloc = ""
+                        if netloc and netloc in seen_domains:
+                            continue
+                        filtered.append(r)
+                    structured_result["retailers"] = filtered
+                    structured_result["total_found"] = len(filtered)
+            except Exception:
+                # Best-effort filtering only
+                pass
+
     # Info logging removed
             return json.dumps(structured_result, indent=2)
 
@@ -129,13 +161,29 @@ class PerplexityRetailerResearchTool(BaseTool):
         self,
         product_query: str,
         max_retailers: int,
-        search_instructions: Optional[str] = None
+        search_instructions: Optional[str] = None,
+        exclude_urls: Optional[List[str]] = None,
+        exclude_domains: Optional[List[str]] = None,
     ) -> str:
         """Build context-aware prompt for retailer research."""
+        exclude_urls = exclude_urls or []
+        exclude_domains = exclude_domains or []
+        exclusions_block = ""
+        if exclude_urls or exclude_domains:
+            urls_text = "\n".join(f"- {u}" for u in exclude_urls) if exclude_urls else "- (none)"
+            domains_text = "\n".join(f"- {d}" for d in exclude_domains) if exclude_domains else "- (none)"
+            exclusions_block = f"""
+
+EXCLUSIONS (do NOT include these again):
+URLs already seen:
+{urls_text}
+Domains already seen:
+{domains_text}
+"""
 
         if search_instructions:
             # Use enhanced search instructions when provided (feedback-driven)
-            prompt = f"""{search_instructions}
+            prompt = f"""{search_instructions}{exclusions_block}
 
 Present your findings for at least 3 different retailers (if available) and no more than {max_retailers}. If you cannot find at least 3 retailers, explain why in your response.
 
@@ -156,7 +204,7 @@ If you encounter any issues or limitations during your search, such as the produ
 Remember, your final output should only include the retailer information in the specified format, along with any necessary explanations about your findings. Do not include any of your search process or internal thoughts in the final response."""
         else:
             # Default prompt when no enhanced instructions are provided
-            prompt = f"""You are tasked with finding UK retailers that currently sell "{product_query}" online. Your goal is to provide accurate and up-to-date information about where UK customers can purchase this product.
+            prompt = f"""You are tasked with finding UK retailers that currently sell "{product_query}" online. Your goal is to provide accurate and up-to-date information about where UK customers can purchase this product.{exclusions_block}
 
 Follow these guidelines:
 1. Search for reputable UK-based online retailers that sell the specified product.
