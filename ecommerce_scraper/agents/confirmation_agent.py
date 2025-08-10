@@ -42,12 +42,17 @@ class ConfirmationAgent:
         if llm:
             agent_config["llm"] = llm
 
-        # If no LLM provided, respect configured model for consistency
-        if llm is None and settings.openai_api_key:
+        # If no LLM provided, configure one based on available provider keys
+        if llm is None:
             try:
                 from crewai import LLM as CrewLLM
                 model_name = settings.agent_model_name
-                agent_config["llm"] = CrewLLM(model=model_name)
+                if settings.openai_api_key:
+                    agent_config["llm"] = CrewLLM(model=model_name)
+                elif settings.perplexity_api_key:
+                    agent_config["llm"] = CrewLLM(model="perplexity/llama-3.1-sonar-small-128k-online")
+                elif settings.google_api_key:
+                    agent_config["llm"] = CrewLLM(model="gemini/gemini-1.5-flash")
             except Exception:
                 pass
 
@@ -103,25 +108,22 @@ class ConfirmationAgent:
             CrewAI Task configured for product confirmation with schema validation
         """
         from crewai import Task
-        from urllib.parse import urlparse
+         
 
         names = self._tools_summary()
-        try:
-            retailer_domain = urlparse(retailer_url).netloc if isinstance(retailer_url, str) else ""
-        except Exception:
-            retailer_domain = ""
+       
 
         task_description = f"""
         Goal: Confirm if {retailer} sells "{product_query}" using {names["product_tool"]} and, if purchasable,
         return the minimal product fields: name, url, price.
 
-        Inputs: product_query, retailer, retailer_domain={retailer_domain}, retailer_url={retailer_url}
+        Inputs: product_query, retailer, retailer_url={retailer_url}
 
         TOOL USAGE:
         - Call {names["product_tool"]} with:
           - product_query: "{product_query}"
           - retailer: "{retailer}"
-          - retailer_domain: "{retailer_domain}"
+          - retailer_url: "{retailer_url}"
           - keywords: true
           - search_instructions: "Allow keywords related to the product to be used in the search"
 

@@ -55,12 +55,21 @@ class ResearchAgent:
         if llm:
             agent_config["llm"] = llm
 
-        # If no LLM provided, align with configured model for consistency
-        if llm is None and settings.openai_api_key:
+        # If no LLM provided, configure one based on available provider keys
+        if llm is None:
             try:
                 from crewai import LLM as CrewLLM
                 model_name = settings.agent_model_name
-                agent_config["llm"] = CrewLLM(model=model_name)
+                if settings.openai_api_key:
+                    # Use configured OpenAI model
+                    agent_config["llm"] = CrewLLM(model=model_name)
+                elif settings.perplexity_api_key:
+                    # Fallback to Perplexity Sonar if OpenAI is unavailable
+                    agent_config["llm"] = CrewLLM(model="perplexity/llama-3.1-sonar-small-128k-online")
+                elif settings.google_api_key:
+                    # Fallback to Gemini
+                    agent_config["llm"] = CrewLLM(model="gemini/gemini-1.5-flash")
+                # else: leave unset; tools will still be available but LLM calls will fail
             except Exception as e:
                 # Log but continue with default agent (tools-only)
                 self.error_logger.error(f"Failed to configure LLM for ResearchAgent: {e}", exc_info=True)
@@ -162,9 +171,9 @@ class ResearchAgent:
 
         # Build exclusion text for prompt clarity and instruct tool usage with explicit args
         exclude_urls = exclude_urls or []
-        exclude_domains = exclude_domains or []
         exclude_urls_text = "\n".join(f"- {u}" for u in exclude_urls) if exclude_urls else "- None"
-        exclude_domains_text = "\n".join(f"- {d}" for d in exclude_domains) if exclude_domains else "- None"
+        # exclude_domains = exclude_domains or []
+        # exclude_domains_text = "\n".join(f"- {d}" for d in exclude_domains) if exclude_domains else "- None"
 
         task_description = f"""
         Conduct improved retailer research for "{product_query}" using validation feedback to address previous issues.
@@ -178,8 +187,7 @@ class ResearchAgent:
         Exclude the following previously seen items (do NOT return these again):
         URLs already seen:
         {exclude_urls_text}
-        Domains already seen:
-        {exclude_domains_text}
+       
 
         **VALIDATION FEEDBACK FROM PREVIOUS ATTEMPT:**
 

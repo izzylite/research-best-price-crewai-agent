@@ -358,15 +358,12 @@ class ProductSearchScraper:
             # Create results directory
             results_dir = Path("product-search-results")
             results_dir.mkdir(exist_ok=True)
-
-            # Create session-specific directory
-            session_dir = results_dir / self.session_id
-            session_dir.mkdir(exist_ok=True)
+ 
 
             # Generate filename with timestamp
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             filename = f"product_search_{timestamp}.json"
-            filepath = session_dir / filename
+            filepath = results_dir / filename
 
             # Save results
             with open(filepath, 'w', encoding='utf-8') as f:

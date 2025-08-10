@@ -97,10 +97,15 @@ class PerplexityUrlLegitimacyTool(BaseTool):
         ref_clause = (
             f"Use this reference retailer URL for domain alignment/context if helpful: {retailer_url}." if retailer_url else ""
         )
+        guidance = (
+            "Treat official retailer product detail pages as valid even if the page requires sign-in, is temporarily unavailable, or shows 'out of stock'. "
+            "Only mark is_purchasable=false in such cases but still set is_product_page=true."
+        )
         return (
-            f"Validate that this URL{retailer_clause}{product_clause} is a direct product page and purchasable: {url}.\n"
+            f"Validate that this URL{retailer_clause}{product_clause} is a direct product page and assess purchasability: {url}.\n"
             f"- It must not be a price comparison site, affiliate aggregator, or search/category page.\n"
             f"- Prefer official retailer domains and canonical product pages.\n"
+            f"- {guidance}\n"
             f"- {price_clause}\n"
             f"- {ref_clause}\n\n"
             f"Return ONLY a JSON object with keys: is_product_page (bool), is_purchasable (bool), is_comparison_site (bool), notes (string)."

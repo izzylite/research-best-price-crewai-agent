@@ -34,10 +34,6 @@ class RetailerProductInput(BaseModel):
         default=None,
         description="Optional candidate direct product URL to prefer if valid (e.g., a page discovered upstream)",
     )
-    retailer_domain: Optional[str] = Field(
-        default=None,
-        description="Optional official retailer domain to constrain results (e.g., 'tesco.com')",
-    )
     keywords: bool = Field(True, description="Allow keywords related to the product to be used in the search")
     search_instructions: Optional[str] = Field(
         default=None,
@@ -66,8 +62,7 @@ class PerplexityRetailerProductTool(BaseTool):
         self,
         product_query: str,
         retailer: str,
-        retailer_url: Optional[str] = None,
-        retailer_domain: Optional[str] = None,
+        retailer_url: Optional[str] = None, 
         keywords: bool = True,
         search_instructions: Optional[str] = None,
     ) -> str:
@@ -92,8 +87,7 @@ class PerplexityRetailerProductTool(BaseTool):
             prompt = self._build_prompt(
                 product_query=product_query,
                 retailer=retailer,
-                retailer_url=retailer_url,
-                retailer_domain=retailer_domain,
+                retailer_url=retailer_url, 
                 keywords=keywords,
                 search_instructions=search_instructions,
             )
@@ -124,7 +118,6 @@ class PerplexityRetailerProductTool(BaseTool):
         product_query: str,
         retailer: str,
         retailer_url: Optional[str],
-        retailer_domain: Optional[str],
         keywords: bool,
         search_instructions: Optional[str],
     ) -> str:
