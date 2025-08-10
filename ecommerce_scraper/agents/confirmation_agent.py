@@ -4,7 +4,7 @@ from typing import List, Optional, Dict, Any
 from crewai import Agent, LLM
 from ..config.settings import settings
 from ..config.settings import settings 
-from ..schemas.agent_outputs import ExtractionResult
+from ..schemas.agent_outputs import ConfirmationResult
 from ..ai_logging.error_logger import get_error_logger
 from ..tools.perplexity_retailer_product_tool import PerplexityRetailerProductTool
 
@@ -16,7 +16,7 @@ class ConfirmationAgent:
     """Agent that confirms product availability via Perplexity and returns name, url, price."""
 
     def __init__(self, stagehand_tool=None, verbose: bool = True, tools: List = None, llm: Optional[LLM] = None):
-        """Initialize the extraction agent with Perplexity product confirmation tool only."""
+        """Initialize the confirmation agent with the Perplexity product confirmation tool only."""
         # Ignore browser tools; use only the Perplexity product tool
         product_tool = PerplexityRetailerProductTool()
         tools = [product_tool]
@@ -51,7 +51,7 @@ class ConfirmationAgent:
             except Exception:
                 pass
 
-        self.error_logger = get_error_logger("extraction_agent")
+        self.error_logger = get_error_logger("confirmation_agent")
         self.agent = Agent(**agent_config)
 
     def _tools_summary(self) -> Dict[str, str]:
@@ -76,15 +76,14 @@ class ConfirmationAgent:
     
  
      
-    def create_product_search_extraction_task(self,
+    def create_product_search_confirmation_task(self,
                                             product_query: str,
                                             retailer: str,
-                                            retailer_url: str,
-                                            session_id: str = None):
+                                            retailer_url: str):
         """
-        Create a task for targeted product search extraction focusing on core fields.
+        Create a task for targeted product confirmation focusing on core fields.
 
-        Uses custom schema for extraction:
+        Uses custom schema for confirmation:
         {
           "fields": {
             "name": "str",           // Product name as displayed
@@ -97,11 +96,11 @@ class ConfirmationAgent:
         Args:
             product_query: Specific product to search for
             retailer: Name of the retailer website
-            retailer_url: URL to navigate to for extraction
+            retailer_url: URL to navigate to for confirmation
             session_id: Optional session identifier for tracking
 
         Returns:
-            CrewAI Task configured for product extraction with schema validation
+            CrewAI Task configured for product confirmation with schema validation
         """
         from crewai import Task
         from urllib.parse import urlparse
@@ -116,7 +115,7 @@ class ConfirmationAgent:
         Goal: Confirm if {retailer} sells "{product_query}" using {names["product_tool"]} and, if purchasable,
         return the minimal product fields: name, url, price.
 
-        Inputs: product_query, retailer, retailer_domain={retailer_domain}, retailer_url={retailer_url}, session_id={session_id}
+        Inputs: product_query, retailer, retailer_domain={retailer_domain}, retailer_url={retailer_url}
 
         TOOL USAGE:
         - Call {names["product_tool"]} with:
@@ -127,8 +126,8 @@ class ConfirmationAgent:
           - search_instructions: "Allow keywords related to the product to be used in the search"
 
         DECISION:
-        - If the tool returns exists=false, output products=[] and extraction_successful=false.
-        - If exists=true, output a single product with fields name, url, price from the tool.
+        - If the tool returns exists=false, output product=null and confirmation_successful=false.
+        - If exists=true, output a single object in 'product' with fields name, url, price from the tool.
 
         Constraints:
         - Do NOT browse or scrape; ONLY use {names["product_tool"]}.
@@ -145,53 +144,50 @@ class ConfirmationAgent:
                 expected_output=f"""
             Return a valid JSON object only (no extra text):
             {{
-              "products": [
-                {{
-                  "name": "Exact product name",
-                  "url": "direct product page url",
-                  "price": "£XX.XX"
-                }}
-              ],
+              "product": {{
+                "name": "Exact product name",
+                "url": "direct product page url",
+                "price": "£XX.XX"
+              }},
               "errors": [
-                "Any error messages encountered during extraction"
+                "Any error messages encountered during confirmation"
               ],
-              "extraction_summary": {{
+              "confirmation_summary": {{
                 "search_query": "{product_query}",
                 "retailer": "{retailer}", 
-                "extraction_successful": <true/false>
+                "confirmation_successful": <true/false>
               }}
             }}
 
             IMPORTANT:
             - Output JSON only, no wrappers or tags
-            - If the tool returns exists=false, return products=[] and extraction_successful=false
+            - If the tool returns exists=false, return product=null and confirmation_successful=false
             - Ensure URL is a direct product page and price is GBP when available
             - Handle any errors gracefully and include them in the errors array
             """,
-                output_pydantic=ExtractionResult
+                output_pydantic=ConfirmationResult
             )
         except Exception as e:
-            self.error_logger.error(f"Failed to create extraction task: {e}", exc_info=True)
+            self.error_logger.error(f"Failed to create confirmation task: {e}", exc_info=True)
             raise
 
     
-    def create_feedback_enhanced_extraction_task(self,
+    def create_feedback_enhanced_confirmation_task(self,
                                                product_query: str,
                                                retailer: str,
                                                retailer_url: str,
                                                validation_feedback: Dict[str, Any],
-                                               attempt_number: int = 1,
-                                               session_id: str = None):
+                                                attempt_number: int = 1):
         """
-        Create a task for feedback-enhanced product extraction that uses validation feedback to improve results.
+        Create a task for feedback-enhanced product confirmation that uses validation feedback to improve results.
 
-        Uses validation feedback to guide extraction improvements:
+        Uses validation feedback to guide confirmation improvements:
         - Primary issues from previous attempt
-        - Retry recommendations for better extraction
-        - Extraction improvements suggested by validation
+        - Retry recommendations for better confirmation
+        - Confirmation improvements suggested by validation
         - Alternative search strategies
 
-        Uses custom schema for extraction:
+        Uses custom schema for confirmation:
         {
           "fields": {
             "name": "str",           // Product name as displayed
@@ -205,13 +201,12 @@ class ConfirmationAgent:
         Args:
             product_query: Specific product to search for
             retailer: Name of the retailer website
-            retailer_url: URL to navigate to for extraction
+            retailer_url: URL to navigate to for confirmation
             validation_feedback: Feedback from previous validation attempt
             attempt_number: Current retry attempt number
-            session_id: Optional session identifier for tracking
 
         Returns:
-            CrewAI Task configured for feedback-enhanced extraction
+            CrewAI Task configured for feedback-enhanced confirmation
         """
         from crewai import Task
         from urllib.parse import urlparse
@@ -238,7 +233,7 @@ class ConfirmationAgent:
         Retry #{attempt_number}: Confirm if {retailer} sells "{product_query}" using {names["product_tool"]}.
         If purchasable, return minimal fields: name, url, price.
 
-        Inputs: product_query, retailer, retailer_domain={retailer_domain}, retailer_url={retailer_url}, session_id={session_id}
+        Inputs: product_query, retailer, retailer_domain={retailer_domain}, retailer_url={retailer_url}
 
         TOOL USAGE:
         - Call {names["product_tool"]} with:
@@ -251,8 +246,8 @@ class ConfirmationAgent:
         HINTS FROM FEEDBACK (optional context for better disambiguation): {feedback_hint} | Target URL: {retailer_url}
 
         DECISION:
-        - If the tool returns exists=false, output products=[] and extraction_successful=false.
-        - If exists=true, output a single product with fields name, url, price from the tool.
+        - If the tool returns exists=false, output product=null and confirmation_successful=false.
+        - If exists=true, output a single object in 'product' with fields name, url, price from the tool.
 
         Constraints: 
         - URLs must be direct product pages.
@@ -268,34 +263,31 @@ class ConfirmationAgent:
                 expected_output=f"""
             Return a valid JSON object only (no extra text):
             {{
-              "products": [
-                {{
-                  "url": "direct product page url",
-                  "name": "Exact product name", 
-                  "price": "£XX.XX"
-                }}
-              ],
+              "product": {{
+                "url": "direct product page url",
+                "name": "Exact product name", 
+                "price": "£XX.XX"
+              }},
               "errors": [
-                "Any error messages encountered during extraction"
+                "Any error messages encountered during confirmation"
               ],
-              "extraction_summary": {{
+              "confirmation_summary": {{
                 "search_query": "{product_query}",
                 "retailer": "{retailer}",
                 "retry_attempt": {attempt_number},
                 "feedback_applied": true,
-                "total_products_found": <number>,
-                "extraction_successful": <true/false>
+                "confirmation_successful": <true/false>
               }}
             }}
 
             IMPORTANT:
             - Output JSON only, no wrappers or tags
-            - If the tool returns exists=false, return products=[] and extraction_successful=false
+            - If the tool returns exists=false, return product=null and confirmation_successful=false
             - Ensure URL is a direct product page and price is GBP when available
             - Handle any errors gracefully and include them in the errors array
             """,
-                output_pydantic=ExtractionResult
+                output_pydantic=ConfirmationResult
             )
         except Exception as e:
-            self.error_logger.error(f"Failed to create feedback-enhanced extraction task: {e}", exc_info=True)
+            self.error_logger.error(f"Failed to create feedback-enhanced confirmation task: {e}", exc_info=True)
             raise

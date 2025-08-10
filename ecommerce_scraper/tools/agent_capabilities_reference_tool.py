@@ -47,20 +47,20 @@ class AgentCapabilitiesReferenceTool(BaseTool):
         try:
             if agent_name.lower() == "both":
                 research_info = self._get_research_agent_capabilities()
-                extraction_info = self._get_extraction_agent_capabilities()
+                confirmation_info = self._get_confirmation_agent_capabilities()
                 
                 capabilities_data = {
                     "ResearchAgent": research_info,
-                    "ConfirmationAgent": extraction_info,
+                    "ConfirmationAgent": confirmation_info,
                     "feedback_routing_guidelines": self._get_feedback_routing_guidelines()
                 }
             elif agent_name.lower() in ["researchagent", "research_agent", "research"]:
                 capabilities_data = {
                     "ResearchAgent": self._get_research_agent_capabilities()
                 }
-            elif agent_name.lower() in ["confirmationagent", "confirmation_agent", "confirmation", "extractionagent", "extraction_agent", "extraction"]:
+            elif agent_name.lower() in ["confirmationagent", "confirmation_agent", "confirmation", "confirmationagent", "confirmation_agent", "confirmation"]:
                 capabilities_data = {
-                    "ConfirmationAgent": self._get_extraction_agent_capabilities()
+                    "ConfirmationAgent": self._get_confirmation_agent_capabilities()
                 }
             else:
                 return f"Error: Unknown agent name '{agent_name}'. Use 'ResearchAgent', 'ConfirmationAgent', or 'both'."
@@ -70,7 +70,11 @@ class AgentCapabilitiesReferenceTool(BaseTool):
                 capabilities_data = self._filter_by_capability_type(capabilities_data, capability_type)
             
             import json
-            return json.dumps(capabilities_data, indent=2)
+            # Add a small note to discourage repeated calls in the same attempt
+            return json.dumps({
+                "capabilities": capabilities_data,
+                "advisory": "Use this reference at most once per validation attempt to avoid loops."
+            }, indent=2)
             
         except Exception as e:
             return f"Error getting agent capabilities: {str(e)}"
@@ -94,13 +98,16 @@ class AgentCapabilitiesReferenceTool(BaseTool):
                     "parameters": {
                         "product_query": "Specific product to search for",
                         "max_retailers": "Maximum number of retailers to find",
-                        "search_instructions": "Enhanced search instructions based on feedback (NEW)"
+                        "search_instructions": "Enhanced search instructions based on feedback",
+                        "exclude_urls": "List of exact product URLs to exclude from results",
+                        "exclude_domains": "List of retailer domains to exclude (e.g., 'example.com')"
                     },
                     "capabilities": [
                         "Research UK retailers for specific products",
                         "Find direct product URLs",
                         "Get pricing information",
-                        "Apply feedback-enhanced search strategies"
+                        "Apply feedback-enhanced search strategies",
+                        "Honor explicit URL/domain exclusions with defensive post-filtering"
                     ]
                 }
             },
@@ -136,7 +143,7 @@ class AgentCapabilitiesReferenceTool(BaseTool):
             },
             "limitations": [
                 "Cannot perform web navigation or page interaction",
-                "Cannot extract product data from web pages",
+                "Cannot confirm product data from web pages",
                 "Cannot handle popups or dynamic content loading",
                 "Cannot validate actual product availability in real-time",
                 "Relies on Perplexity API for research (requires API key)"
@@ -150,8 +157,8 @@ class AgentCapabilitiesReferenceTool(BaseTool):
             ]
         }
 
-    def _get_extraction_agent_capabilities(self) -> Dict[str, Any]:
-        """Get detailed ExtractionAgent capabilities."""
+    def _get_confirmation_agent_capabilities(self) -> Dict[str, Any]:
+        """Get detailed ConfirmationAgent capabilities."""
         return {
             "role": "Perplexity Product Confirmation Specialist",
             "primary_responsibility": "Confirm if a specific retailer sells a product via Perplexity and return name, url, price",
@@ -167,18 +174,20 @@ class AgentCapabilitiesReferenceTool(BaseTool):
                     "parameters": {
                         "product_query": "Product to confirm",
                         "retailer": "Retailer name",
-                        "retailer_domain": "Optional domain constraint",
-                        "require_gbp": "Require GBP price",
-                        "search_instructions": "Feedback-guided disambiguation (NEW)"
+                        "retailer_url": "Optional candidate direct product URL to prefer if valid",
+                        "retailer_domain": "Optional official retailer domain to constrain results (e.g., 'tesco.com')",
+                        "keywords": "Allow using keywords related to the product in confirmation",
+                        "search_instructions": "Feedback-guided disambiguation"
                     },
                     "capabilities": [
                         "Confirm purchasability",
                         "Provide direct product URL",
-                        "Provide GBP price when available"
+                        "Provide GBP price when available",
+                        "Respect domain constraints and leverage provided candidate URLs when supplied"
                     ]
                 }
             },
-            "extraction_schema": {
+            "confirmation_schema": {
                 "MinimalProduct": {
                     "required_fields": ["name", "price", "url"],
                     "optional_fields": [],
@@ -195,7 +204,7 @@ class AgentCapabilitiesReferenceTool(BaseTool):
                     "Incorrect price formatting or currency",
                     "Inaccurate product name"
                 ],
-                "extraction_strategy_issues": [
+                "confirmation_strategy_issues": [
                     "Ambiguous product query",
                     "Retailer has multiple variants",
                     "Needs feedback-driven search_instructions"
@@ -205,7 +214,7 @@ class AgentCapabilitiesReferenceTool(BaseTool):
                 ]
             },
             "feedback_response_capabilities": {
-                "extraction_improvements": "Can refine product confirmation via search_instructions",
+                "confirmation_improvements": "Can refine product confirmation via search_instructions",
                 "schema_fixes": "Can adjust minimal field formatting",
                 "retry_strategies": "Can re-confirm with refined hints"
             },
@@ -238,7 +247,7 @@ class AgentCapabilitiesReferenceTool(BaseTool):
                     "URL quality improvements"
                 ]
             },
-            "extraction_agent_priority": {
+            "confirmation_agent_priority": {
                 "conditions": [
                     "More than 50% of validation failures are data quality related",
                     "Minimal fields missing (name, url, price)",
@@ -253,12 +262,12 @@ class AgentCapabilitiesReferenceTool(BaseTool):
             },
             "both_agents_needed": {
                 "conditions": [
-                    "Mixed failure types (both research and extraction issues)",
+                    "Mixed failure types (both research and confirmation issues)",
                     "Validation failures span multiple categories",
                     "Previous single-agent retries have failed"
                 ],
-                "recommended_approach": "Research first, then extraction",
-                "reasoning": "Better retailers lead to better extraction opportunities"
+                "recommended_approach": "Research first, then confirmation",
+                "reasoning": "Better retailers lead to better confirmation opportunities"
             }
         }
 

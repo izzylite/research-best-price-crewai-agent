@@ -19,25 +19,25 @@ class ResearchResult(BaseModel):
     research_complete: Optional[bool] = Field(default=True, description="Whether research completed successfully")
 
 
-class ExtractionProduct(BaseModel):
+class ConfirmationProduct(BaseModel):
     name: str = Field(..., description="Product name as displayed")
     website: Optional[str] = Field(None, description="Retailer website URL or domain")
     url: str = Field(..., description="Direct product page URL")
     price: str = Field(..., description="Price in GBP format")
 
 
-class ExtractionSummary(BaseModel):
+class ConfirmationSummary(BaseModel):
     search_query: str
     retailer: str 
-    extraction_successful: Optional[bool] = None
+    confirmation_successful: Optional[bool] = None
     retry_attempt: Optional[int] = None
     feedback_applied: Optional[bool] = None
 
 
-class ExtractionResult(BaseModel):
-    products: List[ExtractionProduct] = Field(default_factory=list)
+class ConfirmationResult(BaseModel):
+    product: Optional[ConfirmationProduct] = None
     errors: Optional[List[str]] = None
-    extraction_summary: Optional[ExtractionSummary] = None
+    confirmation_summary: Optional[ConfirmationSummary] = None
 
 
 class AgentFeedback(BaseModel):
@@ -48,7 +48,7 @@ class AgentFeedback(BaseModel):
     retry_recommendations: Optional[List[str]] = None
     alternative_retailers: Optional[List[str]] = None
     search_refinements: Optional[List[str]] = None
-    extraction_improvements: Optional[List[str]] = None
+    confirmation_improvements: Optional[List[str]] = None
     schema_fixes: Optional[List[str]] = None
     # New optional fields to guide ResearchAgent to avoid duplicates
     already_searched_retailers: Optional[List[Dict[str, Any]]] = None
@@ -70,6 +70,6 @@ class TargetedFeedbackResult(BaseModel):
     max_attempts: int
     failure_analysis: Optional[Dict[str, Any]] = None
     research_feedback: Optional[AgentFeedback] = None
-    extraction_feedback: Optional[AgentFeedback] = None
+    confirmation_feedback: Optional[AgentFeedback] = None
     retry_strategy: Optional[RetryStrategy] = None
 

@@ -1,6 +1,94 @@
-# 🛒 AI-Powered Ecommerce Scraper
+# 🛒 AI-Powered UK Product Search (Perplexity-driven)
 
-A comprehensive, multi-agent ecommerce scraping system built with **Stagehand** and **CrewAI** that intelligently extracts product data from major ecommerce platforms including Amazon, eBay, Shopify stores, and generic ecommerce sites.
+Focused, multi-agent system built with CrewAI that finds where a specific product is sold by legitimate UK retailers. It uses Perplexity for retailer discovery, product confirmation, and URL legitimacy checks, then returns minimal structured results.
+
+## What this project does now (Updated)
+
+- Research retailers (Perplexity)
+- Confirm the product exists on a given retailer and return minimal fields (Perplexity)
+- Validate URL legitimacy and generate targeted feedback for retries (Perplexity)
+- Orchestrate the above in a CrewAI Flow and save results to `product-search-results/<session>/...`
+
+### Agents and tools
+- `agents/research_agent.py` → `perplexity_retailer_research_tool`
+- `agents/confirmation_agent.py` → `perplexity_retailer_product_tool`
+- `agents/validation_agent.py` → `perplexity_url_legitimacy_tool`, `agent_capabilities_reference_tool`
+
+### Quick start
+1) Install deps
+```bash
+pip install -r requirements.txt
+```
+
+2) Set environment (create `.env`)
+```env
+# Required
+PERPLEXITY_API_KEY=your_perplexity_key
+
+# Optional
+OPENAI_API_KEY=your_openai_key
+PERPLEXITY_MODEL=llama-3.1-sonar-large-128k-online
+```
+
+3) Run the interactive CLI
+```bash
+python product_search_scraper.py
+```
+
+Or run the Flow directly:
+```python
+from ecommerce_scraper.workflows.product_search_flow import ProductSearchFlow
+
+flow = ProductSearchFlow(verbose=True)
+flow.kickoff(inputs={
+  "product_query": "Heinz Baked Beans 415g",
+  "max_retailers": 5,
+  "max_retries": 3,
+  "session_id": "test_session"
+})
+print(flow.state.final_results)
+```
+
+### Minimal result item
+```json
+{
+  "product_name": "Heinz Baked Beans In Tomato Sauce 415G",
+  "price": "£1.20",
+  "url": "https://www.tesco.com/...",
+  "retailer": "Tesco"
+}
+```
+
+### Project structure (current)
+```
+ecommerce_scraper/
+├── agents/
+│   ├── research_agent.py               # Perplexity retailer discovery
+│   ├── confirmation_agent.py           # Perplexity product confirmation
+│   └── validation_agent.py             # URL legitimacy + feedback routing
+├── schemas/
+│   ├── product_search_result.py        # Final result model
+│   └── agent_outputs.py                # Agent I/O contracts
+├── tools/
+│   ├── perplexity_retailer_research_tool.py
+│   ├── perplexity_retailer_product_tool.py
+│   ├── perplexity_url_legitimacy_tool.py
+│   └── agent_capabilities_reference_tool.py
+└── workflows/
+    └── product_search_flow.py          # CrewAI Flow orchestration
+
+examples/
+└── perplexity_recursive_test.py        # Iteratively refines Perplexity research
+
+product_search_scraper.py               # CLI for product-specific search
+```
+
+Notes:
+- The system is Perplexity-first (no browser scraping). Stagehand wiring remains for session management and future expansion.
+- Results are UK-focused and prioritize direct product pages with GBP pricing where available.
+
+---
+Legacy documentation below (original README retained for reference):
 
 ## ✨ Features
 

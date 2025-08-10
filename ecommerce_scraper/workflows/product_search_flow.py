@@ -13,10 +13,8 @@ from crewai.flow.flow import listen, start, router
 from rich.console import Console
 
 from ..agents.research_agent import ResearchAgent
-from ..agents.extraction_agent import ConfirmationAgent
-from ..agents.product_search_validation_agent import ProductSearchValidationAgent
-from ..schemas.product_search_result import ProductSearchResult, ProductSearchItem
-from ..tools.simplified_stagehand_tool import SimplifiedStagehandTool
+from ..agents.confirmation_agent import ConfirmationAgent
+from ..agents.validation_agent import ProductSearchValidationAgent 
 from ..ai_logging.error_logger import get_error_logger
 
 logger = logging.getLogger(__name__)
@@ -33,16 +31,17 @@ class ProductSearchState(BaseModel):
     
     # Flow state
     current_retailer_index: int = Field(0, description="Current retailer being processed")
-    current_attempt: int = Field(1, description="Current attempt number for current retailer")
+    current_attempt: int = Field(1, description="Current attempt number for current retailer") 
     
     # Research results
-    retailers: List[Dict[str, Any]] = Field(default_factory=list, description="Retailers discovered for extraction (vendor,url,price)")
-    
-    # Extraction results
-    current_retailer_products: List[Dict[str, Any]] = Field(default_factory=list, description="Products from current retailer")
+    retailers: List[Dict[str, Any]] = Field(default_factory=list, description="Retailers discovered for confirmation (vendor,url,price)")
+    used_retailers: List[Dict[str, Any]] = Field(default_factory=list, description="Retailers already used in the current session")
+    # confirmation results
+    current_retailer_product: Optional[Dict[str, Any]] = Field(default=None, description="Single confirmed product for current retailer")
     
     # Validation results
     validated_products: List[Dict[str, Any]] = Field(default_factory=list, description="All validated products")
+    validated_product: Optional[Dict[str, Any]] = Field(default=None, description="Last validated product")
     validation_feedback: Optional[Dict[str, Any]] = Field(None, description="Validation feedback for retries")
     targeted_feedback: Optional[Dict[str, Any]] = Field(None, description="Targeted feedback for both agents")
     
@@ -60,7 +59,7 @@ class ProductSearchFlow(Flow[ProductSearchState]):
     """
     CrewAI Flow for product-specific search across UK retailers.
     
-    Flow: Research → Extract → Validate → [Retry Loop] → Next Retailer → Complete
+    Flow: Research → Confirm → Validate → [Retry Loop] → Next Retailer → Complete
     """
     
     def __init__(self, verbose: bool = True):
@@ -72,15 +71,10 @@ class ProductSearchFlow(Flow[ProductSearchState]):
         
         # Initialize agents (will be created on-demand)
         self._research_agent = None
-        self._extraction_agent = None
+        self._confirmation_agent = None
         self._validation_agent = None
         
-        # Shared tools and session management
-        self._stagehand_tool = None
-        self._shared_session_id = None
-        # Track global research retries to avoid unbounded cycles when no products are found
-        self._research_retry_count: int = 0
-        self._max_research_retry_count: int = 2
+        
     
     def _safe_parse_json(self, result: Any, default: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Parse CrewAI result to JSON dict safely, salvaging when needed.
@@ -206,40 +200,24 @@ class ProductSearchFlow(Flow[ProductSearchState]):
             return []
         return []
 
-    def _get_stagehand_tool(self):
-        """Get or create shared Stagehand tool instance."""
-        if self._stagehand_tool is None:
-            self._stagehand_tool = SimplifiedStagehandTool(
-                session_id=self._shared_session_id,
-                verbose=self.verbose
-            )
-        return self._stagehand_tool
+   
     
     def _get_research_agent(self) -> ResearchAgent:
         """Get or create ResearchAgent instance."""
         if self._research_agent is None:
-            self._research_agent = ResearchAgent(
-                stagehand_tool=self._get_stagehand_tool(),
-                verbose=self.verbose
-            )
+            self._research_agent = ResearchAgent(stagehand_tool=None, verbose=self.verbose)
         return self._research_agent
     
-    def _get_extraction_agent(self) -> ConfirmationAgent:
+    def _get_confirmation_agent(self) -> ConfirmationAgent:
         """Get or create ConfirmationAgent instance."""
-        if self._extraction_agent is None:
-            self._extraction_agent = ConfirmationAgent(
-                stagehand_tool=self._get_stagehand_tool(),
-                verbose=self.verbose
-            )
-        return self._extraction_agent
+        if self._confirmation_agent is None:
+            self._confirmation_agent = ConfirmationAgent(stagehand_tool=None, verbose=self.verbose)
+        return self._confirmation_agent
     
     def _get_validation_agent(self) -> ProductSearchValidationAgent:
         """Get or create ProductSearchValidationAgent instance."""
         if self._validation_agent is None:
-            self._validation_agent = ProductSearchValidationAgent(
-                stagehand_tool=self._get_stagehand_tool(),
-                verbose=self.verbose
-            )
+            self._validation_agent = ProductSearchValidationAgent(stagehand_tool=None, verbose=self.verbose)
         return self._validation_agent
 
     def _build_research_exclusions(self) -> Dict[str, List[str]]:
@@ -248,7 +226,7 @@ class ProductSearchFlow(Flow[ProductSearchState]):
         Excludes:
         - URLs from previously researched retailers
         - URLs from validated products
-        - URLs from most recent extraction attempt
+        - URLs from most recent confirmation attempt
         """
         exclude_urls: List[str] = []
         exclude_domains: List[str] = []
@@ -276,17 +254,17 @@ class ProductSearchFlow(Flow[ProductSearchState]):
                             exclude_domains.append(netloc)
                     except Exception:
                         pass
-            # From current extraction attempt
-            for p in self.state.current_retailer_products or []:
-                url = (p or {}).get('url')
-                if url and isinstance(url, str):
-                    exclude_urls.append(url)
-                    try:
-                        netloc = urlparse(url).netloc
-                        if netloc:
-                            exclude_domains.append(netloc)
-                    except Exception:
-                        pass
+            # From current confirmation attempt
+            p = self.state.current_retailer_product or {}
+            url = (p or {}).get('url')
+            if url and isinstance(url, str):
+                exclude_urls.append(url)
+                try:
+                    netloc = urlparse(url).netloc
+                    if netloc:
+                        exclude_domains.append(netloc)
+                except Exception:
+                    pass
         except Exception:
             # Best-effort; ignore errors
             pass
@@ -318,6 +296,14 @@ class ProductSearchFlow(Flow[ProductSearchState]):
         existing_urls: set[str] = set()
         try:
             for rr in self.state.retailers or []:
+                url = (rr or {}).get('url')
+                if isinstance(url, str) and url:
+                    existing_urls.add(url)
+        except Exception:
+            pass
+
+        try:
+            for rr in self.state.used_retailers or []:
                 url = (rr or {}).get('url')
                 if isinstance(url, str) and url:
                     existing_urls.add(url)
@@ -359,30 +345,7 @@ class ProductSearchFlow(Flow[ProductSearchState]):
             if not self.state.retailers or self.state.current_retailer_index >= len(self.state.retailers):
                 self.state.current_retailer_index = 0
 
-    # --- Resource cleanup ---
-    def close_resources(self):
-        """Close external resources like Browserbase/Stagehand sessions."""
-        try:
-            tool = self._stagehand_tool
-            if tool is None:
-                return
-            # Close async tool.close() safely from sync context
-            try:
-                loop = asyncio.get_running_loop()
-                import nest_asyncio
-                nest_asyncio.apply(loop)
-                loop.run_until_complete(tool.close())
-            except RuntimeError:
-                # No running loop
-                asyncio.run(tool.close())
-            except Exception:
-                # If loop run fails, fallback to fresh run
-                asyncio.run(tool.close())
-        except Exception as e:
-            self.error_logger.error(f"Failed to close Stagehand session: {e}", exc_info=True)
-        finally:
-            self._stagehand_tool = None
-
+   
     def _generate_targeted_feedback(self, validation_data: Dict[str, Any]):
         """Generate targeted feedback for both ResearchAgent and ConfirmationAgent."""
         try:
@@ -396,7 +359,6 @@ class ProductSearchFlow(Flow[ProductSearchState]):
                 retailer=retailer_name,
                 attempt_number=self.state.current_attempt,
                 max_attempts=self.state.max_retries,
-                session_id=self.state.session_id,
                 already_searched=self.state.retailers
             )
 
@@ -420,19 +382,19 @@ class ProductSearchFlow(Flow[ProductSearchState]):
 
             if self.verbose:
                 research_priority = feedback_data.get('research_feedback', {}).get('priority', 'low')
-                extraction_priority = feedback_data.get('extraction_feedback', {}).get('priority', 'low')
-                self.console.print(f"[yellow]📋 Generated Targeted Feedback - Research: {research_priority}, Extraction: {extraction_priority}[/yellow]")
+                confirmation_priority = feedback_data.get('confirmation_feedback', {}).get('priority', 'low')
+                self.console.print(f"[yellow]📋 Generated Targeted Feedback - Research: {research_priority}, confirmation: {confirmation_priority}[/yellow]")
 
         except Exception as e:
             logger.error(f"Failed to generate targeted feedback: {str(e)}", exc_info=True)
             # Fallback to basic feedback
             self.state.targeted_feedback = {
                 "research_feedback": {"should_retry": True, "priority": "medium"},
-                "extraction_feedback": {"should_retry": True, "priority": "medium"},
-                "retry_strategy": {"recommended_approach": "extraction_first"}
+                "confirmation_feedback": {"should_retry": True, "priority": "medium"},
+                "retry_strategy": {"recommended_approach": "confirmation_first"}
             }
 
-    def _generate_feedback_for_empty_retailers(self) -> None:
+    def _generate_feedback_for_empty_retailers(self) -> Dict[str, Any]:
         """Generate research-first targeted feedback when no retailers are available."""
         try:
             feedback_task = self._get_validation_agent().create_targeted_feedback_task(
@@ -441,7 +403,6 @@ class ProductSearchFlow(Flow[ProductSearchState]):
                 retailer="N/A",
                 attempt_number=self.state.current_attempt,
                 max_attempts=self.state.max_retries,
-                session_id=self.state.session_id,
                 already_searched=self.state.retailers
             )
             feedback_crew = Crew(
@@ -454,17 +415,17 @@ class ProductSearchFlow(Flow[ProductSearchState]):
                 feedback_data = result.pydantic.model_dump()
             else:
                 feedback_data = self._safe_parse_json(result, default={})
-            self.state.targeted_feedback = feedback_data or {
+            return feedback_data or {
                 "research_feedback": {"should_retry": True, "priority": "medium"},
-                "extraction_feedback": {"should_retry": False, "priority": "low"},
+                "confirmation_feedback": {"should_retry": False, "priority": "low"},
                 "retry_strategy": {"recommended_approach": "research_first"}
             }
         except Exception as e:
             self.error_logger.error(f"Failed to generate targeted feedback for empty retailers: {e}", exc_info=True)
             # Fallback to a minimal research-first directive
-            self.state.targeted_feedback = {
+            return {
                 "research_feedback": {"should_retry": True, "priority": "medium"},
-                "extraction_feedback": {"should_retry": False, "priority": "low"},
+                "confirmation_feedback": {"should_retry": False, "priority": "low"},
                 "retry_strategy": {"recommended_approach": "research_first"}
             }
 
@@ -476,9 +437,7 @@ class ProductSearchFlow(Flow[ProductSearchState]):
                 self.console.print(f"[blue]🔍 Initializing Product Search[/blue]")
                 self.console.print(f"[cyan]Product: {self.state.product_query}[/cyan]")
 
-            # Set shared session ID from state (populated by kickoff)
-            self._shared_session_id = self.state.session_id
-
+ 
             if self.verbose:
                 self.console.print("[green]✅ Product search initialized[/green]")
 
@@ -488,6 +447,33 @@ class ProductSearchFlow(Flow[ProductSearchState]):
             error_msg = f"Failed to initialize product search: {str(e)}"
             self.error_logger.error(error_msg, exc_info=True)
             return {"action": "error", "error": error_msg}
+    
+    def increment_retailer_index(self) -> bool:
+        """Increment the retailer index and reset the attempt number.
+
+        Returns:
+            bool: True if there are more retailers to process, False if we've reached the end
+        """
+        self.state.current_retailer_index += 1
+        self.state.current_attempt = 1
+        self.state.retailers_searched += 1
+        # Clear feedback between retailers to avoid stale guidance
+        self.state.targeted_feedback = None
+        self.state.validation_feedback = None
+        self.state.current_retailer_product = None
+
+        # Boundary check: return False if we've exceeded the retailers list
+        return self.state.current_retailer_index < len(self.state.retailers)
+ 
+
+    def has_more_retailers(self) -> bool:
+        """Check if there are more retailers to process.
+
+        Returns:
+            bool: True if there are more retailers, False otherwise
+        """
+        return self.state.current_retailer_index < len(self.state.retailers)
+
     
     @listen(initialize_search)
     def research_retailers(self, _init_result: Dict[str, Any]) -> Dict[str, Any]:
@@ -499,8 +485,7 @@ class ProductSearchFlow(Flow[ProductSearchState]):
             # Create retailer research task
             research_task = self._get_research_agent().create_retailer_research_task(
                 product_query=self.state.product_query,
-                max_retailers=self.state.max_retailers,
-                session_id=self.state.session_id
+                max_retailers=self.state.max_retailers
             )
 
             # Create and execute research crew
@@ -529,168 +514,134 @@ class ProductSearchFlow(Flow[ProductSearchState]):
             if self.verbose:
                 self.console.print(f"[green]✅ Found {len(self.state.retailers)} retailers[/green]")
             
-            return {"action": "extract_products", "retailers_found": len(self.state.retailers)}
+            return {"action": "confirm_products", "retailers_found": len(self.state.retailers)}
             
         except Exception as e:
             error_msg = f"Retailer research failed: {str(e)}"
             self.error_logger.error(error_msg, exc_info=True)
             return {"action": "error", "error": error_msg}
            
-            
-    def increment_retailer_index(self) -> bool:
-        """Increment the retailer index and reset the attempt number.
-
-        Returns:
-            bool: True if there are more retailers to process, False if we've reached the end
-        """
-        self.state.current_retailer_index += 1
-        self.state.current_attempt = 1
-        self.state.retailers_searched += 1
-
-        # Boundary check: return False if we've exceeded the retailers list
-        return self.state.current_retailer_index < len(self.state.retailers)
-
-    def get_current_retailer(self) -> Optional[Dict[str, Any]]:
-        """Safely get the current retailer with bounds checking.
-
-        Returns:
-            Dict[str, Any] or None: Current retailer data or None if index is invalid
-        """
-        if not self.state.retailers or self.state.current_retailer_index >= len(self.state.retailers):
-            return None
-        return self.state.retailers[self.state.current_retailer_index]
-
-    def has_more_retailers(self) -> bool:
-        """Check if there are more retailers to process.
-
-        Returns:
-            bool: True if there are more retailers, False otherwise
-        """
-        return self.state.current_retailer_index < len(self.state.retailers)
 
 
     @listen(research_retailers)
-    def extract_products(self, research_result: Dict[str, Any]) -> Dict[str, Any]:
-        """Extract products from the current retailer."""
+    def confirm_products(self, research_result: Dict[str, Any]) -> Dict[str, Any]:
+        """confirm products from the current retailer."""
         try:
             if research_result.get("action") == "error":
                 return {"action": "error", "error": research_result.get("error")}
             
-            # Check if we have retailers to search
-            hasMore = self.has_more_retailers()
-            if not self.state.retailers or not hasMore:
-                return {"action": "finalize", "reason":  "no_more_retailers" if not hasMore else "empty_retailers"}
+            if not self.state.retailers:
+                return {"action": "finalize", "reason": "empty_retailers"}
+            
+            if self.state.current_retailer_index >= len(self.state.retailers):
+                return {"action": "finalize", "reason": "no_more_retailers"}
+            
+            
             
             current_retailer = self.state.retailers[self.state.current_retailer_index]
             retailer_name = current_retailer.get('vendor', 'Unknown')
 
             # Get retailer URL; if invalid/missing, skip to next or finalize
             retailer_url = current_retailer.get('url', '')
-            if not retailer_url or not retailer_url.startswith('http'):
-                if not self.increment_retailer_index():
-                    return {"action": "finalize", "reason": "no_more_retailers"}
-                return {"action": "extract_products", "skipped": retailer_name}
+
+            if not retailer_url or not retailer_url.startswith('http'): 
+                return {"action": "skipped", "reason": "Invalid retailer URL"}
             
             if self.verbose:
-                self.console.print(f"[blue]📦 Extracting from {retailer_name}[/blue]")
+                self.console.print(f"[blue]📦 confirming from {retailer_name}[/blue]")
             
-            # Create extraction task
-            extraction_task = self._get_extraction_agent().create_product_search_extraction_task(
+            # Create confirmation task
+            confirmation_task = self._get_confirmation_agent().create_product_search_confirmation_task(
                 product_query=self.state.product_query,
                 retailer=retailer_name,
-                retailer_url=retailer_url,
-                session_id=self.state.session_id
+                retailer_url=retailer_url
             )
             
-            # Create and execute extraction crew
-            extraction_crew = Crew(
-                agents=[self._get_extraction_agent().get_agent()],
-                tasks=[extraction_task],
+            # Create and execute confirmation crew
+            confirmation_crew = Crew(
+                agents=[self._get_confirmation_agent().get_agent()],
+                tasks=[confirmation_task],
                 verbose=self.verbose
             )
             
-            result = extraction_crew.kickoff()
+            result = confirmation_crew.kickoff()
 
             if hasattr(result, 'pydantic') and getattr(result, 'pydantic') is not None:
-                extraction_data = result.pydantic.model_dump()
+                confirmation_data = result.pydantic.model_dump()
             else:
-                # Parse extraction results safely
-                extraction_data = self._safe_parse_json(result, default={"products": []})
+                # Parse confirmation results safely
+                confirmation_data = self._safe_parse_json(result, default={"product": None})
             
-            # Store current retailer products
-            self.state.current_retailer_products = extraction_data.get('products', [])
+            # Store single confirmed product
+            product_obj = confirmation_data.get('product')
+            self.state.current_retailer_product = product_obj if isinstance(product_obj, dict) else None
             self.state.total_attempts += 1
             
             if self.verbose:
-                self.console.print(f"[green]✅ Extracted {len(self.state.current_retailer_products)} products[/green]")
+                self.console.print(f"[green]✅ Confirmed {'1' if self.state.current_retailer_product else '0'} product[/green]")
             
             return {
                 "action": "validate_products", 
-                "products_extracted": len(self.state.current_retailer_products),
+                "product_confirmed": True if self.state.current_retailer_product else False,
                 "retailer": retailer_name
             }
             
         except Exception as e:
-            error_msg = f"Product extraction failed: {str(e)}"
+            error_msg = f"Product confirmation failed: {str(e)}"
             self.error_logger.error(error_msg, exc_info=True)
             return {"action": "error", "error": error_msg}
 
    
     
-    @listen(extract_products)
-    def validate_products(self, extraction_result: Dict[str, Any]) -> Dict[str, Any]:
-        """Validate extracted products and provide feedback for retries."""
+    @listen(confirm_products)
+    def validate_products(self, confirmation_result: Dict[str, Any]) -> Dict[str, Any]:
+        """Validate confirmed products and provide feedback for retries."""
         try:
-            # Handle terminal/empty cases from extraction safely before any indexing
-            if extraction_result.get("action") == "finalize" and extraction_result.get("reason") == "no_more_retailers":
-                # We have exhausted the retailer list; finalize immediately
-                self.state.current_retailer_products = []
-                self.state.current_retailer_index = len(self.state.retailers)
-                return {"action": "finalize", "reason": "no_more_retailers"}
-            # If no retailers were found and we still have retries left, let the ValidationAgent
-            # generate targeted feedback for a research-first retry.
-            if extraction_result.get("action") == "finalize" and extraction_result.get("reason") == "empty_retailers":
-                try:
-                    if self.state.current_attempt < self.state.max_retries:
-                        self._generate_feedback_for_empty_retailers()
-                except Exception as e:
-                    self.error_logger.error(f"Failed to generate targeted feedback for empty retailers: {e}", exc_info=True)
-                    # Fallback to a minimal research-first directive
-                    self.state.targeted_feedback = {
-                        "research_feedback": {"should_retry": True, "priority": "medium"},
-                        "extraction_feedback": {"should_retry": False, "priority": "low"},
-                        "retry_strategy": {"recommended_approach": "research_first"}
-                    }
-
-                return {"action": "route_after_validation", "validation_passed": False}
-
-            if extraction_result.get("action") == "error":
-                return {"action": "error", "error": extraction_result.get("error")}
-
-            # Safely get current retailer with bounds checking
-            current_retailer = self.get_current_retailer()
-            if current_retailer is None:
-                return {"action": "finalize", "reason": "retailer_index_out_of_bounds"}
-            retailer_name = current_retailer.get('vendor', 'Unknown')
-            product_url = current_retailer.get('url', '')
-            if not product_url or not product_url.startswith('http'):
-                # Skip invalid entry
-                if not self.increment_retailer_index():
-                    return {"action": "finalize", "reason": "no_more_retailers"}
-                return {"action": "extract_products", "skipped": retailer_name}
+            if confirmation_result.get("action") == "skipped":
+                return {"action": "skipped", "reason": confirmation_result.get("reason")}
             
+            if confirmation_result.get("action") == "error":
+                return {"action": "error", "error": confirmation_result.get("error")}
+
+            # Handle terminal/empty cases from confirmation safely before any indexing
+            if confirmation_result.get("action") == "finalize":
+                reason = confirmation_result.get("reason")
+                self.state.current_retailer_product = None
+                if reason == "no_more_retailers":
+                    # We have exhausted the retailer list; finalize immediately
+                    self.state.current_retailer_index = len(self.state.retailers)
+                    return {"action": "finalize", "reason": "no_more_retailers"}
+                elif reason == "empty_retailers":
+                    # If no retailers were found and we still have retries left, let the ValidationAgent
+                    # generate targeted feedback for a research-first retry.
+                    return {"action": "route_after_validation", "validation_passed": False, "reason": "empty_retailers"}
+
+           
+
+            # Use product URL from the confirmed product; do not rely on current retailer here
+            # This ensures we validate exactly what was confirmed
+            if not self.state.current_retailer_product:
+                return {"action": "skipped", "reason": "no_product"}
+
+            retailer_name = self.state.current_retailer_product.get('retailer', 'Unknown')
+            product_url = self.state.current_retailer_product.get('url', '')
+            product_price = self.state.current_retailer_product.get('price', '')
+            
+            if not product_url or not product_url.startswith('http'):
+                return {"action": "skipped", "reason": "Invalid retailer URL"}
+
+
             if self.verbose:
                 self.console.print(f"[magenta]✅ Validating Products from {retailer_name}[/magenta]")
             
             # Create validation task
             validation_task = self._get_validation_agent().create_product_search_validation_task(
-                search_query=self.state.product_query,
-                extracted_products=self.state.current_retailer_products,
+                search_query=self.state.product_query, 
                 retailer=retailer_name,
                 retailer_url=product_url,
+                retailer_price = product_price,
                 attempt_number=self.state.current_attempt,
-                max_attempts=self.state.max_retries,
-                session_id=self.state.session_id
+                max_attempts=self.state.max_retries
             )
             
             # Create and execute validation crew
@@ -708,11 +659,13 @@ class ProductSearchFlow(Flow[ProductSearchState]):
                 # Parse validation results safely
                 validation_data = self._safe_parse_json(result, default={"validated_products": [], "validation_passed": False})
             
-            # Store validated products
-            validated_products = validation_data.get('validated_products', [])
-            self.state.validated_products.extend(validated_products)
+            # Store validated product (single)
+            self.state.validated_product = validation_data.get('validated_product') if isinstance(validation_data.get('validated_product'), dict) else None
+            if self.state.validated_product:
+                self.state.validated_products.append(self.state.validated_product)
+           
 
-            validation_passed = validation_data.get('validation_passed', False)
+            validation_passed = validation_data.get('validation_passed', False) 
 
             # Store validation feedback for potential retries
             self.state.validation_feedback = validation_data.get('feedback', {})
@@ -722,7 +675,7 @@ class ProductSearchFlow(Flow[ProductSearchState]):
                 self._generate_targeted_feedback(validation_data)
 
             if self.verbose:
-                self.console.print(f"[green]✅ Validated {len(validated_products)} products[/green]")
+                self.console.print(f"[green]✅ Validated {'1' if self.state.validated_product else '0'} product[/green]")
 
             return {"action": "route_after_validation", "validation_passed": validation_passed}
             
@@ -737,28 +690,36 @@ class ProductSearchFlow(Flow[ProductSearchState]):
         try:
             if validation_result.get("action") == "error":
                 return "finalize"
+            
+            if validation_result.get("action") == "skipped":
+                # Always advance when we skip (invalid URL or no product)
+                self.increment_retailer_index()
+                return "confirm_products_next"
 
              
             
             validation_passed = validation_result.get("validation_passed", False)
 
              
-            # If extraction produced no products, immediately move to next retailer per spec
-            if not self.state.current_retailer_products:
+            # If confirmation produced no products, immediately move to next retailer per spec
+            if not self.state.current_retailer_product and not validation_result.get("reason","") == "empty_retailers":
                 # Move to next retailer without retries
                 has_more = self.increment_retailer_index()
 
                 if self.verbose:
-                    self.console.print("[yellow]⏭️ No products extracted; moving to next retailer[/yellow]")
+                    self.console.print("[yellow]⏭️ No products confirmed; moving to next retailer[/yellow]")
 
                 if not has_more:
                     # If we exhausted all retailers and found nothing overall, route to feedback-driven research retry
                     if not self.state.validated_products:
-                        # Cap global research retries using max_retries to prevent long-running loops
-                        if self._research_retry_count < self._max_research_retry_count:
-                            self._research_retry_count += 1
+                         
+                        if self.state.current_attempt < self.state.max_retries: 
+                            self.state.current_attempt += 1
+                            self.state.used_retailers.extend(self.state.retailers)
+                            self.state.retailers = []
+                            self.state.targeted_feedback = self._generate_feedback_for_empty_retailers()
                             if self.verbose:
-                                self.console.print("[magenta]🧭 No products found; triggering feedback-driven research retry (" + str(self._research_retry_count) + "/" + str(self.state.max_retries) + ")[/magenta]")
+                                self.console.print(f"[cyan]🎯 Feedback-Driven Research Retry: {self.state.current_attempt} of {self.state.max_retries}[/cyan]")
                             return "retry_research_with_feedback"
                         else:
                             if self.verbose:
@@ -766,7 +727,7 @@ class ProductSearchFlow(Flow[ProductSearchState]):
                             return "finalize"
                     return "finalize"
                 else:
-                    return "extract_products"
+                    return "confirm_products_next"
             
             # If validation passed or we've reached max retries, move to next retailer
             if validation_passed or self.state.current_attempt >= self.state.max_retries:
@@ -777,22 +738,30 @@ class ProductSearchFlow(Flow[ProductSearchState]):
                 if not has_more:
                     return "finalize"
                 else:
-                    return "extract_products"
+                    return "confirm_products_next"
             
             # If validation failed and we haven't reached max retries, determine retry strategy
-            else:
+            else: 
                 self.state.current_attempt += 1
+                if self.verbose:
+                    self.console.print(f"[cyan]🎯 Feedback-Driven Research Retry: {self.state.current_attempt} of {self.state.max_retries}[/cyan]")
+
+                if self.state.current_attempt >= self.state.max_retries: 
+                    has_more = self.increment_retailer_index()
+                    if not has_more:
+                        return "finalize"
+                    return "confirm_products_next"
 
                 # Use targeted feedback to determine which agent should retry
                 if self.state.targeted_feedback:
                     retry_strategy = self.state.targeted_feedback.get('retry_strategy', {})
-                    recommended_approach = retry_strategy.get('recommended_approach', 'extraction_first')
+                    recommended_approach = retry_strategy.get('recommended_approach', 'research_first')
 
                     research_feedback = self.state.targeted_feedback.get('research_feedback', {})
-                    extraction_feedback = self.state.targeted_feedback.get('extraction_feedback', {})
+                    confirmation_feedback = self.state.targeted_feedback.get('confirmation_feedback', {})
 
                     research_should_retry = research_feedback.get('should_retry', False)
-                    extraction_should_retry = extraction_feedback.get('should_retry', False)
+                    confirmation_should_retry = confirmation_feedback.get('should_retry', False)
 
                     if self.verbose:
                         self.console.print(f"[cyan]🎯 Retry Strategy: {recommended_approach}[/cyan]")
@@ -800,17 +769,17 @@ class ProductSearchFlow(Flow[ProductSearchState]):
                     # Route based on targeted feedback
                     if recommended_approach == "research_first" and research_should_retry:
                         return "retry_research_with_feedback"
-                    elif recommended_approach == "extraction_first" and extraction_should_retry:
-                        return "retry_extraction_with_feedback"
+                    elif recommended_approach == "confirmation_first" and confirmation_should_retry:
+                        return "retry_confirmation_with_feedback"
                     elif recommended_approach == "both_parallel":
-                        # For now, do research first then extraction
+                        # For now, do research first then confirmation
                         return "retry_research_with_feedback"
                     else:
-                        # Default to extraction retry
-                        return "retry_extraction_with_feedback"
-                else:
-                    # Fallback to extraction retry if no targeted feedback
-                    return "retry_extraction_with_feedback"
+                        # Default to confirmation retry
+                        return "retry_confirmation_with_feedback"
+                else: 
+                    self.state.targeted_feedback = self._generate_feedback_for_empty_retailers()
+                    return "retry_research_with_feedback"
                 
         except Exception as e:
             self.error_logger.error(f"Routing error: {str(e)}", exc_info=True)
@@ -825,11 +794,9 @@ class ProductSearchFlow(Flow[ProductSearchState]):
 
             # Ensure targeted feedback exists (avoid None)
             if not self.state.targeted_feedback:
-                self.state.targeted_feedback = {
-                    "research_feedback": {},
-                    "extraction_feedback": {},
-                    "retry_strategy": {"recommended_approach": "extraction_first"},
-                }
+                error_msg = f"Research retry with feedback failed: No targeted feedback"
+                self.error_logger.error(error_msg, exc_info=True)
+                return {"action": "error", "error": error_msg}
 
             # Create feedback-enhanced research task
             exclusions = self._build_research_exclusions()
@@ -837,8 +804,7 @@ class ProductSearchFlow(Flow[ProductSearchState]):
                 product_query=self.state.product_query,
                 validation_feedback=self.state.targeted_feedback,
                 attempt_number=self.state.current_attempt,
-                max_retailers=self.state.max_retailers,
-                session_id=self.state.session_id,
+                max_retailers=self.state.max_retailers, 
                 exclude_urls=exclusions.get("exclude_urls", []),
                 exclude_domains=exclusions.get("exclude_domains", [])
             )
@@ -869,7 +835,7 @@ class ProductSearchFlow(Flow[ProductSearchState]):
                 retailer_count = len(improved_retailers)
                 self.console.print(f"[green]✅ Improved Research: {retailer_count} better retailers found[/green]")
 
-            return {"action": "extract_products", "research_improved": True}
+            return {"action": "confirm_products", "research_improved": True}
 
         except Exception as e:
             error_msg = f"Research retry with feedback failed: {str(e)}"
@@ -877,94 +843,125 @@ class ProductSearchFlow(Flow[ProductSearchState]):
             return {"action": "error", "error": error_msg}
 
     @listen(route_after_validation)
-    def retry_extraction_with_feedback(self, _route_result: Dict[str, Any]) -> Dict[str, Any]:
-        """Retry extraction using targeted validation feedback to improve results."""
+    def confirm_products_next(self, _route_result: Dict[str, Any]) -> Dict[str, Any]:
+        """Bridge to re-enter confirmation after validation routing.
+
+        This allows the router to return the label 'confirm_products_next' and reliably
+        invoke the existing confirmation step for the next retailer.
+        """
+        # Reuse the existing confirmation logic; it only relies on state
+        return self.confirm_products({"action": "route_after_validation"})
+
+    @listen(confirm_products_next)
+    def validate_products_after_confirm_next(self, result: Dict[str, Any]) -> Dict[str, Any]:
+        """Run the same validation step after the confirm_products_next hop."""
+        return self.validate_products(result)
+
+    @router(validate_products_after_confirm_next)
+    def route_after_validation_after_confirm_next(self, validation_result: Dict[str, Any]) -> str:
+        """Use the same routing logic after validation on the confirm_next path."""
+        return self.route_after_validation(validation_result)
+
+    @listen(route_after_validation)
+    def retry_confirmation_with_feedback(self, _route_result: Dict[str, Any]) -> Dict[str, Any]:
+        """Retry confirmation using targeted validation feedback to improve results."""
         try:
             if self.verbose:
-                self.console.print(f"[yellow]🔄 Retry Extraction with Feedback (Attempt {self.state.current_attempt})[/yellow]")
+                self.console.print(f"[yellow]🔄 Retry confirmation with Feedback (Attempt {self.state.current_attempt})[/yellow]")
 
-            # Safely get current retailer with bounds checking
-            current_retailer = self.get_current_retailer()
-            if current_retailer is None:
-                return {"action": "finalize", "reason": "retailer_index_out_of_bounds"}
+            if not self.state.targeted_feedback:
+                error_msg = f"confirmation retry with feedback failed: No targeted feedback"
+                self.error_logger.error(error_msg, exc_info=True)
+                return {"action": "error", "error": error_msg}
+
+            if not self.state.retailers:
+                return {"action": "finalize", "reason": "empty_retailers"}
+            
+            if self.state.current_retailer_index >= len(self.state.retailers):
+                return {"action": "finalize", "reason": "no_more_retailers"}
+            
+            
+            
+            current_retailer = self.state.retailers[self.state.current_retailer_index]
+            
+           
             retailer_name = current_retailer.get('vendor', 'Unknown')
 
             # Get retailer URL with fallback logic
             retailer_url = current_retailer.get('url', '')
            
-            # Use targeted feedback for extraction improvements
-            extraction_feedback = self.state.targeted_feedback.get('extraction_feedback', {}) if self.state.targeted_feedback else {}
+            # Use targeted feedback for confirmation improvements
+            confirmation_feedback = self.state.targeted_feedback.get('confirmation_feedback', {}) if self.state.targeted_feedback else {}
 
-            # Create feedback-enhanced extraction task
-            extraction_task = self._get_extraction_agent().create_feedback_enhanced_extraction_task(
+
+            # Create feedback-enhanced confirmation task
+            confirmation_task = self._get_confirmation_agent().create_feedback_enhanced_confirmation_task(
                 product_query=self.state.product_query,
                 retailer=retailer_name,
                 retailer_url=retailer_url,
-                validation_feedback=extraction_feedback,
-                attempt_number=self.state.current_attempt,
-                session_id=self.state.session_id
+                validation_feedback=confirmation_feedback,
+                attempt_number=self.state.current_attempt
             )
 
-            # Create and execute extraction crew
-            extraction_crew = Crew(
-                agents=[self._get_extraction_agent().get_agent()],
-                tasks=[extraction_task],
+            # Create and execute confirmation crew
+            confirmation_crew = Crew(
+                agents=[self._get_confirmation_agent().get_agent()],
+                tasks=[confirmation_task],
                 verbose=self.verbose
             )
 
-            result = extraction_crew.kickoff()
+            result = confirmation_crew.kickoff()
 
             if hasattr(result, 'pydantic') and getattr(result, 'pydantic') is not None:
-                extraction_data = result.pydantic.model_dump()
+                confirmation_data = result.pydantic.model_dump()
             else:
-                # Parse extraction results safely
-                extraction_data = self._safe_parse_json(result, default={"products": []})
+                # Parse confirmation results safely
+                confirmation_data = self._safe_parse_json(result, default={"product": None})
 
-            # Store current retailer products
-            self.state.current_retailer_products = extraction_data.get('products', [])
+            # Store current retailer product
+            self.state.current_retailer_product = confirmation_data.get('product') if isinstance(confirmation_data.get('product'), dict) else None
             self.state.total_attempts += 1
 
             if self.verbose:
-                product_count = len(self.state.current_retailer_products)
-                self.console.print(f"[green]✅ Feedback-Enhanced Extraction: {product_count} products[/green]")
+                self.console.print(f"[green]✅ Feedback-Enhanced confirmation: {'1' if self.state.current_retailer_product else '0'} product[/green]")
 
-            return {"action": "validate_products", "products_extracted": len(self.state.current_retailer_products)}
+            return {"action": "validate_products", "product_confirmed": True if self.state.current_retailer_product else False}
 
         except Exception as e:
-            error_msg = f"Feedback-enhanced extraction failed: {str(e)}"
+            error_msg = f"Feedback-enhanced confirmation failed: {str(e)}"
             self.error_logger.error(error_msg, exc_info=True)
             return {"action": "error", "error": error_msg}
 
     @listen(retry_research_with_feedback)
     def route_after_research_retry(self, retry_result: Dict[str, Any]) -> Dict[str, Any]:
-        """Route after research retry - proceed to extraction with improved retailers."""
+        """Route after research retry - proceed to confirmation with improved retailers."""
         if retry_result.get("action") == "error":
             return {"action": "error", "error": retry_result.get("error")}
 
-        # After research retry, proceed to extraction with improved retailers
-        return {"action": "extract_products", "research_improved": True}
+        # After research retry, proceed to confirmation with improved retailers
+        return {"action": "confirm_products", "research_improved": True}
 
     @router(route_after_research_retry)
-    def route_research_retry_to_extraction(self, research_retry_result: Dict[str, Any]) -> str:
-        """Route research retry result to extraction."""
+    def route_research_retry_to_confirmation(self, research_retry_result: Dict[str, Any]) -> str:
+        """Route research retry result to confirmation."""
         if research_retry_result.get("action") == "error":
             return "finalize"
 
-        # Proceed to extraction with improved research
-        return "extract_products"
+        # Proceed to confirmation with improved research
+        return "confirm_products_next"
 
-    @listen(retry_extraction_with_feedback)
-    def validate_extraction_retry_products(self, retry_result: Dict[str, Any]) -> Dict[str, Any]:
-        """Validate products from feedback-enhanced retry extraction."""
+    @listen(retry_confirmation_with_feedback)
+    def validate_confirmation_retry_products(self, retry_result: Dict[str, Any]) -> Dict[str, Any]:
+        """Validate products from feedback-enhanced retry confirmation."""
         # This uses the same validation logic as the original validate_products method
         return self.validate_products(retry_result)
 
-    @router(validate_extraction_retry_products)
-    def route_after_extraction_retry_validation(self, retry_validation_result: Dict[str, Any]) -> str:
-        """Route after extraction retry validation - same logic as original routing."""
+    @router(validate_confirmation_retry_products)
+    def route_after_confirmation_retry_validation(self, retry_validation_result: Dict[str, Any]) -> str:
+        """Route after confirmation retry validation - same logic as original routing."""
         return self.route_after_validation(retry_validation_result)
 
-    @listen(route_after_extraction_retry_validation)
+    @listen(route_after_confirmation_retry_validation)
     def finalize(self, _route_result: Dict[str, Any]) -> Dict[str, Any]:
         """Finalize the product search and prepare results."""
         try:
@@ -992,7 +989,6 @@ class ProductSearchFlow(Flow[ProductSearchState]):
                 "search_query": self.state.product_query,
                 "results": search_results,
                 "metadata": {
-                    "session_id": self.state.session_id,
                     "retailers_searched": self.state.retailers_searched,
                     "total_attempts": self.state.total_attempts,
                     "success_rate": self.state.success_rate,

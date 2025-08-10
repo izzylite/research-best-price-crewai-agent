@@ -15,8 +15,6 @@ class ResearchAgent:
         """Initialize the research agent with Perplexity research tool."""
         # Create Perplexity retailer research tool
         perplexity_tool = PerplexityRetailerResearchTool()
-
-        # Use only the Perplexity research tool for retailer discovery
         tools = [perplexity_tool]
         self.error_logger = get_error_logger("research_agent")
         
@@ -75,8 +73,7 @@ class ResearchAgent:
 
     def create_retailer_research_task(self,
                                     product_query: str,
-                                    max_retailers: int = 5,
-                                    session_id: str = None):
+                                    max_retailers: int = 5):
         """Create a task for researching UK retailers that sell a specific product."""
         from crewai import Task
 
@@ -85,7 +82,6 @@ class ResearchAgent:
 
         Product Query: {product_query}
         Max Retailers: {max_retailers}
-        Session ID: {session_id}
 
         RETAILER RESEARCH WORKFLOW:
         1. **Use the perplexity_retailer_research_tool to research UK retailers**
@@ -146,7 +142,6 @@ class ResearchAgent:
                                              validation_feedback: Dict[str, Any],
                                              attempt_number: int = 1,
                                              max_retailers: int = 5,
-                                             session_id: str = None,
                                              exclude_urls: Optional[List[str]] = None,
                                              exclude_domains: Optional[List[str]] = None):
         """Create a task for feedback-enhanced retailer research based on validation feedback."""
@@ -179,7 +174,6 @@ class ResearchAgent:
         Product Query: {product_query}
         Max Retailers: {max_retailers}
         Retry Attempt: {attempt_number}
-        Session ID: {session_id}
 
         Exclude the following previously seen items (do NOT return these again):
         URLs already seen:
