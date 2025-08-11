@@ -1,0 +1,32 @@
+{
+  "search_query": "Monster Ultra Gold 12x500ml",
+  "results": [
+    {
+      "product_name": "Monster Energy Drink Ultra Gold 500ml x12",
+      "price": "£15.75",
+      "url": "https://www.yourcoca-cola.co.uk/monster-energy-drink-ultra-gold-500ml-x12/13526330.html",
+      "retailer": "Your Coca-Cola",
+      "timestamp": "2025-08-10T19:10:51.168369"
+    },
+    {
+      "product_name": "Monster Ultra Gold 12x 500ml",
+      "price": "£18.99",
+      "url": "https://www.drinksupermarket.com/monster-ultra-gold-12x-500ml",
+      "retailer": "DrinkSupermarket",
+      "timestamp": "2025-08-10T19:10:51.168385"
+    },
+    {
+      "product_name": "Monster Energy Ultra Gold, Sugar Free Energy Drink (Pack of 12)",
+      "price": "£18.99",
+      "url": "https://www.kidzbuzz.co.uk/products/monster-energy-drink-12x500ml-ultra-gold",
+      "retailer": "KidzBuzz",
+      "timestamp": "2025-08-10T19:10:51.168394"
+    }
+  ],
+  "metadata": {
+    "retailers_searched": 3,
+    "total_attempts": 0,
+    "success_rate": 0.0,
+    "completed_at": "2025-08-10T19:10:51.168461"
+  }
+}

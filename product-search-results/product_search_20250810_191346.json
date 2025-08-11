@@ -6,20 +6,20 @@
       "price": "£620.10",
       "url": "https://www.amazon.co.uk/dp/B0XYZPS5PRO",
       "retailer": "Amazon UK",
-      "timestamp": "2025-08-10T18:38:00.553110"
+      "timestamp": "2025-08-10T19:13:46.003730"
     },
     {
       "product_name": "PlayStation 5 Pro Digital Console",
       "price": "£699.99",
       "url": "https://www.argos.co.uk/product/4440006",
       "retailer": "Argos",
-      "timestamp": "2025-08-10T18:38:00.553123"
+      "timestamp": "2025-08-10T19:13:46.003809"
     }
   ],
   "metadata": {
-    "retailers_searched": 3,
-    "total_attempts": 1,
-    "success_rate": 2.0,
-    "completed_at": "2025-08-10T18:38:00.553161"
+    "retailers_searched": 2,
+    "total_attempts": 0,
+    "success_rate": 0.0,
+    "completed_at": "2025-08-10T19:13:46.003962"
   }
 }

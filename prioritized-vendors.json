@@ -1,0 +1,20 @@
+[
+  { "name": "Aptamil", "url": "https://www.aptaclub.co.uk/" },
+  { "name": "Argos", "url": "https://www.argos.co.uk/" },
+  { "name": "ASDA", "url": "https://www.asda.com/" },
+  { "name": "Boots", "url": "https://www.boots.com/" },
+  { "name": "Costco UK", "url": "https://www.costco.co.uk/" },
+  { "name": "Harrods", "url": "https://www.harrods.com/" },
+  { "name": "Holland&Barrett", "url": "https://www.hollandandbarrett.com/" },
+  { "name": "John Lewis", "url": "https://www.johnlewis.com/" },
+  { "name": "Kendamil", "url": "https://www.kendamil.com/" },
+  { "name": "Lidl", "url": "https://www.lidl.co.uk/" },
+  { "name": "Lush", "url": "https://www.lush.com/uk/en" },
+  { "name": "McGrocer Direct", "url": "https://www.mcgrocer.com/" },
+  { "name": "M&S", "url": "https://www.marksandspencer.com/" },
+  { "name": "Ocado", "url": "https://www.ocado.com/" },
+  { "name": "Orientalmart", "url": "https://www.orientalmart.co.uk/" },
+  { "name": "Sainsburys", "url": "https://www.sainsburys.co.uk/" },
+  { "name": "Superdrug", "url": "https://www.superdrug.com/" }
+]
+

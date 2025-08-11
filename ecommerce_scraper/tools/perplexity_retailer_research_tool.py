@@ -18,7 +18,8 @@ Docs consulted:
 
 import json
 import logging
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Set
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from crewai.tools import BaseTool
 from pydantic import BaseModel, Field
 import requests
@@ -76,6 +77,24 @@ class PerplexityRetailerResearchTool(BaseTool):
         self._model = os.getenv("PERPLEXITY_MODEL") or "llama-3.1-sonar-large-128k-online"
         # store last response metadata (usage/citations/search_results)
         self._last_response_meta: Dict[str, Any] = {}
+        # Priority vendors (names and domains) loaded from prioritized-vendors.json at repo root
+        self._priority_vendors: List[Dict[str, str]] = []
+        self._priority_domains: Set[str] = set()
+        self._priority_vendor_names: Set[str] = set()
+        # Max parallel calls for priority vendor checks (tune via env)
+        try:
+            self._priority_max_concurrency: int = max(
+                1, int(os.getenv("PERPLEXITY_PRIORITY_MAX_CONCURRENCY", "4"))
+            )
+        except Exception:
+            self._priority_max_concurrency = 4
+        try:
+            self._load_priority_vendors()
+        except Exception:
+            # Soft-fail: continue without priority vendors if file missing/invalid
+            self._priority_vendors = []
+            self._priority_domains = set()
+            self._priority_vendor_names = set()
 
     def _run(
         self,
@@ -105,21 +124,78 @@ class PerplexityRetailerResearchTool(BaseTool):
             if not self._api_key:
                 return self._fallback_retailer_result(product_query, max_retailers)
 
-            # Build research prompt (now uses search_instructions and explicit exclusions if provided)
+            # 1) Iterative research across priority vendors first
+            # Skip this step when feedback-enhanced retries are in effect
+            # (indicated by non-empty search_instructions), to avoid re-checking the same vendors.
+            collected: List[Dict[str, Any]] = []
+            seen_urls: set[str] = set(exclude_urls or [])
+            excluded_domains: set[str] = set(exclude_domains or [])
+            if self._priority_vendors and not search_instructions:
+                # Run priority vendor checks concurrently for speed
+                max_workers = min(self._priority_max_concurrency, len(self._priority_vendors))
+                if max_workers <= 0:
+                    max_workers = 1
+                with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    future_to_vendor = {}
+                    for v in self._priority_vendors:
+                        vendor_name = v.get("name") or v.get("vendor") or ""
+                        domain = v.get("domain") or ""
+                        future = executor.submit(
+                            self._research_single_vendor, product_query, vendor_name, domain
+                        )
+                        future_to_vendor[future] = (vendor_name, domain)
+
+                    for future in as_completed(future_to_vendor):
+                        if len(collected) >= max_retailers:
+                            break
+                        result = None
+                        try:
+                            result = future.result()
+                        except Exception:
+                            result = None
+                        if not result:
+                            continue
+                        url = (result or {}).get("url") or ""
+                        if not url or url in seen_urls:
+                            continue
+                        # Exclude unwanted domains if configured
+                        try:
+                            from urllib.parse import urlparse
+                            netloc = urlparse(url).netloc
+                        except Exception:
+                            netloc = ""
+                        if netloc in excluded_domains:
+                            continue
+                        # Mark as prioritized; if no price present, downgrade to non-priority
+                        result["priority"] = True
+                        price_value = (result or {}).get("price")
+                        if not isinstance(price_value, str) or not price_value.strip():
+                            result["priority"] = False
+                        collected.append(result)
+                        seen_urls.add(url)
+
+            # If we already have enough, return now
+            if len(collected) >= max_retailers:
+                return json.dumps(
+                    {
+                        "product_query": product_query,
+                        "ai_search_response": "PRIORITY_VENDOR_CHECK",
+                        "retailers": collected[:max_retailers],
+                        "total_found": len(collected[:max_retailers]),
+                    },
+                    indent=2,
+                )
+
+            # 2) Fallback to current broader research to fill remaining slots
+            remaining_needed = max(0, max_retailers - len(collected)) or max_retailers
             prompt = self._build_retailer_research_prompt(
-                product_query, max_retailers, search_instructions, exclude_urls or [], exclude_domains or []
+                product_query, remaining_needed, search_instructions, list(seen_urls), list(excluded_domains)
             )
 
-            # Call Perplexity API
-            retailer_data = self._call_perplexity_api(
-                prompt
-            )
+            retailer_data = self._call_perplexity_api(prompt)
 
-            # Parse and structure the response
             structured_result = self._structure_retailer_response(
-                retailer_data,
-                product_query,
-                max_retailers
+                retailer_data, product_query, max_retailers
             )
 
             # Fallback: if no retailers found, retry once without strict schema
@@ -136,7 +212,6 @@ class PerplexityRetailerResearchTool(BaseTool):
 
             # Enforce exclusions defensively even if the model ignores the prompt
             try:
-                seen_urls = set(exclude_urls or [])
                 seen_domains = set(exclude_domains or [])
                 retailers_list = structured_result.get("retailers", []) or []
                 if seen_urls or seen_domains:
@@ -162,8 +237,26 @@ class PerplexityRetailerResearchTool(BaseTool):
                 # Best-effort filtering only
                 pass
 
-    # Info logging removed
-            return json.dumps(structured_result, indent=2)
+            # Ensure fallback results are explicitly marked as non-priority
+            fallback_list = structured_result.get("retailers", []) or []
+            for r in fallback_list:
+                if isinstance(r, dict) and "priority" not in r:
+                    r["priority"] = False
+
+            # Merge priority results (collected) with fallback results, avoiding duplicates
+            merged = collected + [r for r in fallback_list if (r or {}).get("url") not in seen_urls]
+            if len(merged) > max_retailers:
+                merged = merged[:max_retailers]
+
+            return json.dumps(
+                {
+                    "product_query": product_query,
+                    "ai_search_response": structured_result.get("ai_search_response"),
+                    "retailers": merged,
+                    "total_found": len(merged),
+                },
+                indent=2,
+            )
 
         except Exception as e:
             self._logger.error(f"[PERPLEXITY] Retailer research failed: {e}")
@@ -189,6 +282,8 @@ class PerplexityRetailerResearchTool(BaseTool):
 EXCLUSIONS (do NOT include these again):
 URLs already seen:
 {urls_text}
+Domains to exclude:
+{domains_text}
 """
 
         default_prompt = f"""You are tasked with finding UK retailers that currently sell "{product_query}" online.
@@ -207,6 +302,9 @@ URLs already seen:
         - Only include a retailer if you have a direct product URL (starting with http).
         - If none qualify, respond with an empty list: [].
         - Prefer prices in GBP with the £ symbol, when available.
+
+        TARGET COUNT:
+        - Aim to return up to {max_retailers} unique UK retailers that meet the criteria. If fewer than {max_retailers} are available, return as many valid results as you can find.
 
         RANKING & PRICE NORMALIZATION:
         - Return results sorted by price in ascending order (cheapest first).
@@ -237,6 +335,127 @@ URLs already seen:
 
         return prompt
 
+    # --------------------- Priority Vendors Helpers ---------------------
+    def _load_priority_vendors(self) -> None:
+        """Load priority vendors from `prioritized-vendors.json` at repo root.
+
+        Expected JSON shape:
+        [ { "name": "Vendor", "url": "https://domain.tld/..." }, ... ]
+        """
+        repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+        json_path = os.path.join(repo_root, "prioritized-vendors.json")
+        try:
+            with open(json_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except FileNotFoundError:
+            # Nothing to prioritize
+            return
+        except Exception as exc:  # noqa: BLE001
+            # Malformed file: ignore
+            logger.warning(f"Failed to load priority vendors from {json_path}: {exc}")
+            return
+
+        if not isinstance(data, list):
+            return
+        from urllib.parse import urlparse
+
+        def normalize_domain(netloc: str) -> str:
+            netloc = (netloc or "").strip().lower()
+            return netloc[4:] if netloc.startswith("www.") else netloc
+
+        vendors: List[Dict[str, str]] = []
+        domains: set[str] = set()
+        names: set[str] = set()
+        for item in data:
+            if not isinstance(item, dict):
+                continue
+            name = (item.get("name") or item.get("vendor") or "").strip()
+            url = (item.get("url") or "").strip()
+            domain = ""
+            try:
+                if url:
+                    domain = normalize_domain(urlparse(url).netloc)
+            except Exception:
+                domain = ""
+            entry = {"name": name}
+            if domain:
+                entry["domain"] = domain
+                domains.add(domain)
+            if name:
+                names.add(name.lower())
+            vendors.append(entry)
+        self._priority_vendors = vendors
+        self._priority_domains = domains
+        self._priority_vendor_names = names
+
+    def _research_single_vendor(self, product_query: str, vendor_name: str, vendor_domain: Optional[str]) -> Optional[Dict[str, Any]]:
+        """Ask Perplexity to find a single product listing for one vendor.
+
+        Returns a single object with keys {vendor, url, price?, notes?} or None when not found.
+        """
+        if not vendor_name and not vendor_domain:
+            return None
+
+        domain_hint = f" ({vendor_domain})" if vendor_domain else ""
+        instruction = f"You are checking whether '{vendor_name}{domain_hint}' sells '{product_query}' online in the UK."
+
+        user_prompt = f"""
+{instruction}
+
+REQUIREMENTS:
+- Only return a single JSON object if you find a direct product page URL on this vendor's own site.
+- The JSON object must have: vendor, url, and may include price and notes.
+- If the vendor does not sell it or no direct URL exists, return null (the literal JSON null).
+- The URL must start with http and belong to this vendor domain{' (' + vendor_domain + ')' if vendor_domain else ''}.
+- Prefer current, in-stock listings for UK customers.
+
+OUTPUT:
+- If found: a single JSON object
+- If not found: null
+"""
+
+        # Encourage the model to scope to a specific domain by including the domain in the instruction
+        if vendor_domain:
+            user_prompt += f"\nDOMAIN TO SEARCH FIRST: {vendor_domain}\n"
+
+        raw = self._call_perplexity_api(user_prompt, enforce_schema=False)
+        content = (raw or "").strip()
+        # Normalize to single object or None
+        try:
+            if content.lower() == "null":
+                return None
+            # Some models wrap in code fences or text; try to salvage JSON object
+            obj: Optional[Dict[str, Any]] = None
+            if content.startswith("{"):
+                obj = json.loads(content)
+            else:
+                # Attempt to find first JSON object in the text
+                obj = self._salvage_first_json_object(content)
+            if not isinstance(obj, dict):
+                return None
+            # Minimal validation
+            url = obj.get("url")
+            vendor = obj.get("vendor") or vendor_name
+            if not isinstance(url, str) or not url.startswith("http"):
+                return None
+            obj["vendor"] = vendor
+            obj["priority"] = False  # default; upgraded to True when coming from priority path
+            return obj
+        except Exception:
+            return None
+
+    # Utility to salvage first JSON object from a text blob
+    def _salvage_first_json_object(self, text: str) -> Optional[Dict[str, Any]]:
+        try:
+            start = text.find("{")
+            end = text.rfind("}")
+            if start == -1 or end == -1 or end <= start:
+                return None
+            snippet = text[start : end + 1]
+            return json.loads(snippet)
+        except Exception:
+            return None
+
     def _call_perplexity_api(
         self,
         prompt: str,
@@ -255,8 +474,7 @@ URLs already seen:
                 "messages": [
                     {
                         "role": "system",
-                        "content": """You are an expert UK retail researcher specializing in finding legitimate UK-based online retailers and providing direct product-page URLs. Always maintain a professional, concise tone.
-"""
+                        "content": """You are an expert UK retail researcher specializing in finding legitimate UK-based online retailers and providing direct product-page URLs. Always maintain a professional, concise tone."""
                     },
                     {
                         "role": "user",
@@ -280,7 +498,9 @@ URLs already seen:
                                     "vendor": {"type": "string", "minLength": 2},
                                     "url": {"type": "string", "pattern": "^https?://"},
                                     "price": {"type": "string"},
-                                    "notes": {"type": "string"}
+                                    "priority": {"type": "boolean"},
+                                    "notes": {"type": "string"},
+                                    
                                 },
                                 # Make price optional to reduce empty [] responses
                                 "required": ["vendor", "url"],
@@ -376,6 +596,21 @@ URLs already seen:
                     parsed_data = self._salvage_json_array(content)
             except Exception:
                 parsed_data = []
+        # If we have priority domains, order results so priority vendors come first
+        if parsed_data and self._priority_domains:
+            from urllib.parse import urlparse
+
+            def is_priority(item: Dict[str, Any]) -> bool:
+                try:
+                    netloc = urlparse((item or {}).get("url", "")).netloc.lower()
+                    if netloc.startswith("www."):
+                        netloc = netloc[4:]
+                    return netloc in self._priority_domains
+                except Exception:
+                    return False
+
+            parsed_data = sorted(parsed_data, key=lambda r: (not is_priority(r)))
+
         if len(parsed_data) > max_retailers:
             parsed_data = parsed_data[:max_retailers]
         return {

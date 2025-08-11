@@ -9,6 +9,7 @@ class ResearchRetailer(BaseModel):
     url: Optional[str] = Field(None, description="Direct product URL")
     price: Optional[str] = Field(None, description="Price string as returned by research tool")
     notes: Optional[str] = Field(None, description="Additional notes")
+    priority: Optional[bool] = Field(False, description="Whether this retailer came from the priority vendor list")
 
 
 class ResearchResult(BaseModel):
