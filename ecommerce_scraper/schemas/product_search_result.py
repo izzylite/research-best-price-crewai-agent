@@ -12,6 +12,7 @@ class ProductSearchItem(BaseModel):
     price: str = Field(..., description="Product price in GBP format (e.g., '£99.99')")
     url: str = Field(..., description="Direct URL to product page")
     retailer: str = Field(..., description="Retailer name (e.g., 'Amazon')")
+    availability: Optional[str] = Field(None, description="Stock status such as 'In stock' or 'Out of stock'")
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), description="When the product was found")
     
     @field_validator('product_name')
@@ -58,6 +59,7 @@ class ProductSearchItem(BaseModel):
             "price": self.price,
             "url": self.url,
             "retailer": self.retailer,
+            "availability": self.availability,
             "timestamp": self.timestamp.isoformat()
         }
 
@@ -157,7 +159,8 @@ class ProductSearchResult(BaseModel):
                     product_name=item_data.get('product_name', 'Unknown'),
                     price=item_data.get('price', '£0.00'),
                     url=item_data.get('url', ''),
-                    retailer=item_data.get('retailer', 'Unknown')
+                    retailer=item_data.get('retailer', 'Unknown'),
+                    availability=item_data.get('availability')
                 ))
         
         return cls(

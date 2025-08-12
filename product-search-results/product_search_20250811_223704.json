@@ -1,0 +1,32 @@
+{
+  "search_query": "Flow tDCS Headset",
+  "results": [
+    {
+      "product_name": "Flow tDCS Portable Wireless Headset",
+      "price": "£119.70",
+      "url": "https://www.boots.com/flow-tdcs-portablewireless-headset-10341534",
+      "retailer": "Boots",
+      "timestamp": "2025-08-11T22:37:04.591412"
+    },
+    {
+      "product_name": "Flow tDCS Portable Wireless Headset",
+      "price": "Price unavailable",
+      "url": "https://medihealthdirect.co.uk/medication/flow-tdcs-portable-wireless-headset/",
+      "retailer": "Medihealth Direct",
+      "timestamp": "2025-08-11T22:37:04.591439"
+    },
+    {
+      "product_name": "Flow Neuroscience Headset",
+      "price": "£399.00",
+      "url": "https://well.co.uk/flow-neuroscience-headset/",
+      "retailer": "Well Pharmacy",
+      "timestamp": "2025-08-11T22:37:04.591448"
+    }
+  ],
+  "metadata": {
+    "retailers_searched": 3,
+    "total_attempts": 0,
+    "success_rate": 0.0,
+    "completed_at": "2025-08-11T22:37:04.591512"
+  }
+}

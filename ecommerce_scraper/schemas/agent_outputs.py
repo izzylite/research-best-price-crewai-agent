@@ -8,6 +8,7 @@ class ResearchRetailer(BaseModel):
     vendor: str = Field(..., description="Retailer/vendor name")
     url: Optional[str] = Field(None, description="Direct product URL")
     price: Optional[str] = Field(None, description="Price string as returned by research tool")
+    availability: Optional[str] = Field(None, description="Stock status such as 'In stock' or 'Out of stock'")
     notes: Optional[str] = Field(None, description="Additional notes")
     priority: Optional[bool] = Field(False, description="Whether this retailer came from the priority vendor list")
 

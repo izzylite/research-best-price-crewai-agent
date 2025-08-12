@@ -17,7 +17,12 @@ from ..agents.research_agent import ResearchAgent
 from ..agents.confirmation_agent import ConfirmationAgent
 from ..agents.validation_agent import ProductSearchValidationAgent 
 from ..agents.feedback_agent import FeedbackAgent
-from ..utils.list_utils import dedupe_preserve_order, existing_urls, append_unique_by_url
+from ..utils.list_utils import (
+    dedupe_preserve_order,
+    existing_urls,
+    append_unique_by_url,
+    restore_product_fields_from_research,
+)
 from ..ai_logging.error_logger import get_error_logger
 
 logger = logging.getLogger(__name__)
@@ -35,13 +40,12 @@ class ProductSearchState(BaseModel):
     # Flow state
     current_retailer_index: int = Field(0, description="Current retailer being processed")
     current_attempt: int = Field(1, description="Current attempt number for current retailer") 
+    backfill_attempt: int = Field(1, description="Current attempt number for result backfill")
     
     # Research results
     retailers: List[Dict[str, Any]] = Field(default_factory=list, description="Retailers discovered for confirmation (vendor,url,price)") 
-    research_result: Optional[Dict[str, Any]] = Field(default=None, description="Research result")
     # confirmation results
     current_retailer_product: Optional[Dict[str, Any]] = Field(default=None, description="Single confirmed product for current retailer")
-    confirmation_result: Optional[Dict[str, Any]] = Field(default=None, description="Confirmation result")
     
     # Validation results
     validated_products: List[Dict[str, Any]] = Field(default_factory=list, description="All validated products")
@@ -49,7 +53,6 @@ class ProductSearchState(BaseModel):
     validation_feedback: Optional[Dict[str, Any]] = Field(None, description="Validation feedback for retries")
     targeted_feedback: Optional[Dict[str, Any]] = Field(None, description="Targeted feedback for both agents")
     excluded_urls: List[str] = Field(default_factory=list, description="Excluded URLs")
-    validation_result: Optional[Dict[str, Any]] = Field(default=None, description="Validation result")
     
     # Final results
     search_results: List[Dict[str, Any]] = Field(default_factory=list, description="Final search results")
@@ -94,15 +97,15 @@ class ProductSearchFlow(Flow[ProductSearchState]):
         self._feedback_agent = None
          
 
-        # Map event names to bound handlers for local fallback emission
+        # Map event names to bound handlers for local fallback emission (payload-aware)
         self._local_event_handlers = {
-            self.Events.RESEARCH_RETAILERS: lambda adapter: self.research_retailers(adapter),
-            self.Events.CONFIRM_PRODUCTS: lambda adapter: self.confirm_products(adapter),
-            self.Events.VALIDATE_PRODUCTS: lambda adapter: self.validate_products(adapter),
-            self.Events.NEXT_PRODUCT: lambda adapter: self.next_product(adapter),
-            self.Events.RETRY_RESEARCH_WITH_FEEDBACK: lambda adapter: self.retry_research_with_feedback(adapter),
-            self.Events.RETRY_CONFIRMATION_WITH_FEEDBACK: lambda adapter: self.retry_confirmation_with_feedback(adapter),
-            self.Events.END: lambda adapter: self.finalize(),
+            self.Events.RESEARCH_RETAILERS: lambda adapter, payload=None: self.research_retailers(adapter, payload),
+            self.Events.CONFIRM_PRODUCTS: lambda adapter, payload=None: self.confirm_products(adapter, payload),
+            self.Events.VALIDATE_PRODUCTS: lambda adapter, payload=None: self.validate_products(adapter, payload),
+            self.Events.NEXT_PRODUCT: lambda adapter, payload=None: self.next_product(adapter, payload),
+            self.Events.RETRY_RESEARCH_WITH_FEEDBACK: lambda adapter, payload=None: self.retry_research_with_feedback(adapter, payload),
+            self.Events.RETRY_CONFIRMATION_WITH_FEEDBACK: lambda adapter, payload=None: self.retry_confirmation_with_feedback(adapter, payload),
+            self.Events.END: lambda adapter, payload=None: self.finalize(payload),
         }
 
     def _create_local_event_adapter(self):
@@ -110,10 +113,21 @@ class ProductSearchFlow(Flow[ProductSearchState]):
         flow = self
 
         class _Adapter:
-            def emit(self_inner, name: str) -> None:
+            def emit(self_inner, name: str, payload: Optional[Dict[str, Any]] = None) -> None:
                 handler = flow._local_event_handlers.get(str(name))
                 if handler is not None:
-                    handler(self_inner)
+                    # Centralized payload→state merge to avoid duplication in handlers
+                    if isinstance(payload, dict) and payload:
+                        try:
+                            for k, v in payload.items():
+                                setattr(flow.state, k, v)
+                        except Exception:
+                            pass
+                    try:
+                        handler(self_inner, payload)
+                    except TypeError:
+                        # Backward compatibility: call without payload if handler doesn't accept it
+                        handler(self_inner)
 
         return _Adapter()
 
@@ -501,8 +515,7 @@ class ProductSearchFlow(Flow[ProductSearchState]):
         Returns:
             bool: True if there are more retailers to process, False if we've reached the end
         """
-        self.state.current_retailer_index += 1
-        self.state.current_attempt = 1
+        self.state.current_retailer_index += 1 
         self.state.retailers_searched += 1
         # Clear feedback between retailers to avoid stale guidance
         self.state.targeted_feedback = None
@@ -512,8 +525,10 @@ class ProductSearchFlow(Flow[ProductSearchState]):
         # Boundary check: return False if we've exceeded the retailers list OR max_retailers limit
         has_more_in_list = self.state.current_retailer_index < len(self.state.retailers)
         within_max_limit = self.state.retailers_searched < self.state.max_retailers
-
-        return has_more_in_list and within_max_limit
+        has_more = has_more_in_list and within_max_limit
+        if not has_more:
+            self.state.current_attempt = 1
+        return has_more
  
 
     def has_more_retailers(self) -> bool:
@@ -536,7 +551,7 @@ class ProductSearchFlow(Flow[ProductSearchState]):
                     return route
            
     
-    def research_retailers(self, event) -> Dict[str, Any]:
+    def research_retailers(self, event, payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Research UK retailers that sell the specified product."""
         try:
             # Block early if no LLM provider is configured to avoid noisy auth errors
@@ -554,7 +569,8 @@ class ProductSearchFlow(Flow[ProductSearchState]):
             # Create retailer research task
             research_task = self._get_research_agent().create_retailer_research_task(
                 product_query=self.state.product_query,
-                max_retailers=self.state.max_retailers
+                max_retailers=self.state.max_retailers,
+                backfill_attempt=self.state.backfill_attempt
             )
 
             # Create and execute research crew
@@ -583,30 +599,25 @@ class ProductSearchFlow(Flow[ProductSearchState]):
             if self.verbose:
                 self.console.print(f"[green]✅ Found {len(self.state.retailers)} retailers[/green]")
             
-            self.state.research_result = {"action": self.Events.CONFIRM_PRODUCTS, "retailers_found": len(self.state.retailers)}
-            # Continue to confirmation step
-            event.emit(self.Events.CONFIRM_PRODUCTS)
+            # Continue to confirmation step using payload instead of state flags
+            event.emit(self.Events.CONFIRM_PRODUCTS, {"retailers_found": len(self.state.retailers)})
         except Exception as e:
             error_msg = f"Retailer research failed: {str(e)}"
             self.error_logger.error(error_msg, exc_info=True) 
             event.emit(self.handle_error_with_feedback("research", error_msg))
            
 
-    def confirm_products(self, event) -> Dict[str, Any]:
+    def confirm_products(self, event, payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """confirm products from the current retailer."""
         try:
-            if self.state.research_result.get("action") == "error": 
-                event.emit(self.handle_error_with_feedback("research", self.state.research_result.get("error")))
-                return
+            # If upstream wanted to route to error, rely on payload/state merge above.
             
             if not self.state.retailers: 
-                self.state.confirmation_result = {"action": self.Events.END, "reason": "empty_retailers"}
-                event.emit(self.Events.VALIDATE_PRODUCTS)
+                event.emit(self.Events.VALIDATE_PRODUCTS, {"reason": "empty_retailers"})
                 return
 
             if self.state.current_retailer_index >= len(self.state.retailers): 
-                self.state.confirmation_result = {"action": self.Events.END, "reason": "no_more_retailers"}
-                event.emit(self.Events.VALIDATE_PRODUCTS)
+                event.emit(self.Events.VALIDATE_PRODUCTS, {"reason": "no_more_retailers"})
                 return
             
             
@@ -630,19 +641,18 @@ class ProductSearchFlow(Flow[ProductSearchState]):
                                 "price": str(retailer_price or ''),
                                 "url": str(retailer_url or ''),
                                 "retailer": str(retailer_name),
+                                "availability": str(current_retailer.get('availability') or ''),
                             })
                 except Exception:
                     pass
-                self.state.confirmation_result = {"action": "skipped", "reason": "priority_bypass"}
-                event.emit(self.Events.VALIDATE_PRODUCTS)
+                event.emit(self.Events.VALIDATE_PRODUCTS, {"reason": "priority_bypass"})
                 return
 
             # Get retailer URL; if invalid/missing, skip to next or finalize
             retailer_url = current_retailer.get('url', '')
 
             if not retailer_url or not retailer_url.startswith('http'): 
-                self.state.confirmation_result = {"action": "skipped", "reason": "Invalid retailer URL"}
-                event.emit(self.Events.VALIDATE_PRODUCTS)
+                event.emit(self.Events.VALIDATE_PRODUCTS, {"reason": "invalid_retailer_url"})
                 return
             
             if self.verbose:
@@ -670,69 +680,65 @@ class ProductSearchFlow(Flow[ProductSearchState]):
                 # Parse confirmation results safely
                 confirmation_data = self._safe_parse_json(result, default={"product": None})
             
-            # Store single confirmed product
+            # Store single confirmed product and restore fields from research when needed
             product_obj = confirmation_data.get('product')
-            self.state.current_retailer_product = product_obj if isinstance(product_obj, dict) else None
-
-            # If confirmation omitted fields, restore from research result when available
-            try:
-                if isinstance(self.state.current_retailer_product, dict):
-                    # Restore price if missing
-                    confirmed_price = self.state.current_retailer_product.get('price')
-                    if not isinstance(confirmed_price, str) or not confirmed_price.strip():
-                        if isinstance(retailer_price, str) and retailer_price.strip():
-                            self.state.current_retailer_product['price'] = retailer_price
-                    # Restore retailer name if missing
-                    confirmed_retailer = self.state.current_retailer_product.get('retailer')
-                    if not isinstance(confirmed_retailer, str) or not confirmed_retailer.strip():
-                        if isinstance(retailer_name, str) and retailer_name.strip():
-                            self.state.current_retailer_product['retailer'] = retailer_name
-                    # Restore product name if missing
-                    confirmed_name = self.state.current_retailer_product.get('name')
-                    if not isinstance(confirmed_name, str) or not confirmed_name.strip():
-                        if isinstance(retailer_product_name, str) and retailer_product_name.strip():
-                            self.state.current_retailer_product['name'] = retailer_product_name
-            except Exception:
-                pass
+            self.state.current_retailer_product = (
+                product_obj if isinstance(product_obj, dict) else None
+            )
+            if isinstance(self.state.current_retailer_product, dict):
+                try:
+                    self.state.current_retailer_product = restore_product_fields_from_research(
+                        self.state.current_retailer_product, current_retailer
+                    )
+                except Exception:
+                    pass
              
             
             if self.verbose:
                 self.console.print(f"[green]✅ Confirmed {'1' if self.state.current_retailer_product else '0'} product[/green]")
             
-            self.state.confirmation_result = {
-                "action": self.Events.VALIDATE_PRODUCTS, 
+            event.emit(self.Events.VALIDATE_PRODUCTS, {
                 "product_confirmed": True if self.state.current_retailer_product else False,
                 "retailer": retailer_name
-            }
-            event.emit(self.Events.VALIDATE_PRODUCTS)
+            })
             
         except Exception as e:
             error_msg = f"Product confirmation failed: {str(e)}"
             self.error_logger.error(error_msg, exc_info=True) 
             event.emit(self.handle_error_with_feedback("confirmation", error_msg))
 
-    def validate_products(self, event) -> Dict[str, Any]:
+    def validate_products(self, event, payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Validate confirmed products and provide feedback for retries."""
         try:
-            if self.state.confirmation_result.get("action") == "skipped":
-                # If skipped due to priority bypass, we already added to validated_products. Move on.
-                reason = self.state.confirmation_result.get("reason")
+            # Handle simple skip reasons via payload
+            reason = payload.get("reason") if isinstance(payload, dict) else None
+            if reason in {"priority_bypass", "invalid_retailer_url", "empty_retailers", "no_more_retailers"}:
                 if reason == "priority_bypass":
-                    self.state.validation_result = {"action": "skipped", "reason": reason}
                     event.emit(self.Events.NEXT_PRODUCT)
                     return
-                else:
-                    self.state.validation_result = {"action": "skipped", "reason": reason}
-                    event.emit("next_product")
-                    return
+                if reason in {"empty_retailers", "no_more_retailers"}:
+                    self.state.current_retailer_product = None
+                    if reason == "no_more_retailers":
+                        self.state.current_retailer_index = len(self.state.retailers)
+                        event.emit(self.Events.END)
+                        return
+                    if reason == "empty_retailers":
+                        if self.state.current_attempt < self.state.max_retries:
+                            event.emit(self.handle_retry())
+                        else:
+                            event.emit(self.Events.NEXT_PRODUCT)
+                        return
+                # default skip → next
+                event.emit(self.Events.NEXT_PRODUCT)
+                return
             
-            if self.state.confirmation_result.get("action") == "error": 
-                event.emit("next_product")
+            if payload.get("action") == "skipped":
+                event.emit(self.Events.NEXT_PRODUCT)
                 return
 
             # Handle terminal/empty cases from confirmation safely before any indexing
-            if self.state.confirmation_result.get("action") == "finalize":
-                reason = self.state.confirmation_result.get("reason")
+            if payload.get("action") == "finalize":
+                reason = payload.get("reason")
                 self.state.current_retailer_product = None
                 if reason == "no_more_retailers":
                     # We have exhausted the retailer list; finalize immediately
@@ -747,7 +753,7 @@ class ProductSearchFlow(Flow[ProductSearchState]):
                     if self.state.current_attempt < self.state.max_retries:
                         event.emit(self.handle_retry())
                     else:
-                        event.emit(self.Events.END)
+                        event.emit(self.Events.NEXT_PRODUCT)
                     return
 
            
@@ -768,8 +774,8 @@ class ProductSearchFlow(Flow[ProductSearchState]):
             product_name = self.state.current_retailer_product.get('name', '')
             product_url = self.state.current_retailer_product.get('url', '')
             product_price = self.state.current_retailer_product.get('price', '')
-            # Use retailer from confirmation step instead of product name
-            retailer_name = self.state.confirmation_result.get('retailer') or ''
+            # Use retailer from payload when provided
+            retailer_name = (payload or {}).get('retailer') or ''
             
             if not product_url or not product_url.startswith('http'):
                 # Exclude problematic URL if present
@@ -824,6 +830,41 @@ class ProductSearchFlow(Flow[ProductSearchState]):
             # Store validated product (single)
             self.state.validated_product = validation_data.get('validated_product') if isinstance(validation_data.get('validated_product'), dict) else None
             if self.state.validated_product:
+                # Backfill price from research result when missing or marked unavailable
+                try:
+                    price_value = self.state.validated_product.get('price')
+                    price_str = str(price_value).strip() if price_value is not None else "" 
+                    if (not price_str) or (price_str.lower() == "price unavailable"): 
+                        if isinstance(product_price, str) and product_price.strip():
+                            self.state.validated_product['price'] = product_price.strip()
+                except Exception:
+                    pass
+
+                # Backfill availability from confirmation or research when missing
+                try:
+                    availability_value = self.state.validated_product.get('availability')
+                    if not isinstance(availability_value, str) or not availability_value.strip():
+                        source_availability = (self.state.current_retailer_product or {}).get('availability') or \
+                                               ((self.state.retailers[self.state.current_retailer_index] or {}).get('availability') if (self.state.retailers and self.state.current_retailer_index < len(self.state.retailers)) else None)
+                        if isinstance(source_availability, str) and source_availability.strip():
+                            self.state.validated_product['availability'] = source_availability.strip()
+                except Exception:
+                    pass
+
+                if not self.state.validated_product.get('price'):
+                    self.state.targeted_feedback = self._generate_static_feedback(
+                        feedback_type="research",
+                        priority="high",
+                        focus="""Ensure the product price is included in the result.
+                        PRODUCT INFORMATION:
+                        product_name: {product_name}
+                        product_url: {product_url}
+                        retailer_name: {retailer_name}
+                        retailer_url: {retailer_url}
+                         """
+                    )
+                    event.emit(self.handle_retry())
+                    return
                 # De-duplicate by URL before appending
                 try:
                     new_url = (self.state.validated_product or {}).get('url')
@@ -850,18 +891,9 @@ class ProductSearchFlow(Flow[ProductSearchState]):
             if self.verbose:
                 self.console.print(f"[green]✅ Validated {'1' if self.state.validated_product else '0'} product[/green]")
 
-            self.state.validation_result =  {"action": "route_after_validation", "validation_passed": validation_passed}
-
-            # Event-driven routing after validation
-            empty_retailers = self.state.validation_result.get("reason","") == "empty_retailers"
-            if empty_retailers:
-                if self.state.current_attempt < self.state.max_retries:
-                    event.emit(self.handle_retry())
-                else:
-                    event.emit(self.Events.END)
-            else:
-                # If we reach here, either validation passed, or attempts exhausted
-                event.emit(self.Events.NEXT_PRODUCT)
+            # If we reach here, either validation passed, or attempts exhausted
+            event.emit(self.Events.NEXT_PRODUCT, {"validation_passed": validation_passed})
+            return
             
         except Exception as e:
             error_msg = f"Product validation failed: {str(e)}"
@@ -886,20 +918,20 @@ class ProductSearchFlow(Flow[ProductSearchState]):
 
             # Route based on targeted feedback
             if recommended_approach == "research_first" and research_should_retry:
-                return "retry_research_with_feedback"
+                return self.Events.RETRY_RESEARCH_WITH_FEEDBACK
             elif recommended_approach == "confirmation_first" and confirmation_should_retry:
-                return "retry_confirmation_with_feedback"
+                return self.Events.RETRY_CONFIRMATION_WITH_FEEDBACK
             elif recommended_approach == "both_parallel":
                 # For now, do research first then confirmation
-                return "retry_research_with_feedback"
+                return self.Events.RETRY_RESEARCH_WITH_FEEDBACK
             else:
                 # Default to confirmation retry
-                return "retry_confirmation_with_feedback"
+                return self.Events.RETRY_CONFIRMATION_WITH_FEEDBACK
         else: 
             self.state.targeted_feedback = self._generate_feedback_for_empty_retailers()
-            return "retry_research_with_feedback"
+            return self.Events.RETRY_RESEARCH_WITH_FEEDBACK
 
-    def next_product(self,event) -> Dict[str, Any]:
+    def next_product(self,event, payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Move to the next product/retailer or finalize if done."""
         try:
             # Increment index and reset attempt count
@@ -909,6 +941,10 @@ class ProductSearchFlow(Flow[ProductSearchState]):
                 # If we have no validated products and retries left, retry; else finalize
                 if not self.state.validated_products and self.state.current_attempt < self.state.max_retries:
                         event.emit(self.handle_retry())
+                # If we have less than max_retailers and backfill_attempt is less than 2, retry research
+                elif len(self.state.validated_products) < self.state.max_retailers and self.state.backfill_attempt < 2:
+                    self.state.backfill_attempt += 1
+                    event.emit(self.Events.RESEARCH_RETAILERS)
                 else:
                     event.emit(self.Events.END)
                 return
@@ -924,7 +960,7 @@ class ProductSearchFlow(Flow[ProductSearchState]):
 
 
 
-    def retry_research_with_feedback(self,event) -> Dict[str, Any]:
+    def retry_research_with_feedback(self,event, payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Retry research using targeted validation feedback to improve retailer discovery."""
         try:
             if self.verbose:
@@ -942,7 +978,8 @@ class ProductSearchFlow(Flow[ProductSearchState]):
                 attempt_number=self.state.current_attempt,
                 max_retailers=self.state.max_retailers, 
                 exclude_urls=exclusions.get("exclude_urls", []),
-                exclude_domains=exclusions.get("exclude_domains", [])
+                exclude_domains=exclusions.get("exclude_domains", []),
+                backfill_attempt=self.state.backfill_attempt
             )
 
             # Create and execute research crew
@@ -982,7 +1019,7 @@ class ProductSearchFlow(Flow[ProductSearchState]):
 
  
 
-    def retry_confirmation_with_feedback(self,event) -> Dict[str, Any]:
+    def retry_confirmation_with_feedback(self,event, payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Retry confirmation using targeted validation feedback to improve results."""
         try:
             if self.verbose:
@@ -994,24 +1031,21 @@ class ProductSearchFlow(Flow[ProductSearchState]):
                 focus="Navigate to a specific product detail page, avoid category/search pages, avoid comparison sites.")
 
             if not self.state.retailers:
-                self.state.confirmation_result = {"action": "end", "reason": "empty_retailers"}
-                event.emit("validate_products")
+                event.emit("validate_products", {"reason": "empty_retailers"})
                 return
 
             if self.state.current_retailer_index >= len(self.state.retailers):
-                self.state.confirmation_result = {"action": "end", "reason": "no_more_retailers"}
-                event.emit("validate_products")
+                event.emit("validate_products", {"reason": "no_more_retailers"})
                 return
             
             
             
             current_retailer = self.state.retailers[self.state.current_retailer_index]
+            retailer_name = current_retailer.get('vendor', 'Unknown')
+            retailer_url = current_retailer.get('url', '') 
             
            
-            retailer_name = current_retailer.get('vendor', 'Unknown')
-
-            # Get retailer URL with fallback logic
-            retailer_url = current_retailer.get('url', '')
+           
            
             # Use targeted feedback for confirmation improvements
             confirmation_feedback = self.state.targeted_feedback.get('confirmation_feedback', {}) if self.state.targeted_feedback else {}
@@ -1041,15 +1075,24 @@ class ProductSearchFlow(Flow[ProductSearchState]):
                 # Parse confirmation results safely
                 confirmation_data = self._safe_parse_json(result, default={"product": None})
 
-            # Store current retailer product
-            self.state.current_retailer_product = confirmation_data.get('product') if isinstance(confirmation_data.get('product'), dict) else None
-            self.state.total_attempts += 1
+            # Store current retailer product and restore fields from research when needed
+            self.state.current_retailer_product = (
+                confirmation_data.get('product')
+                if isinstance(confirmation_data.get('product'), dict)
+                else None
+            )
+            if isinstance(self.state.current_retailer_product, dict):
+                try:
+                    self.state.current_retailer_product = restore_product_fields_from_research(
+                        self.state.current_retailer_product, current_retailer
+                    )
+                except Exception:
+                    pass
 
             if self.verbose:
                 self.console.print(f"[green]✅ Feedback-Enhanced confirmation: {'1' if self.state.current_retailer_product else '0'} product[/green]")
             
-            self.state.confirmation_result = {"action": "validate_products", "product_confirmed": True if self.state.current_retailer_product else False}
-            event.emit("validate_products")
+            event.emit("validate_products", {"product_confirmed": True if self.state.current_retailer_product else False})
             
 
         except Exception as e:
@@ -1076,11 +1119,13 @@ class ProductSearchFlow(Flow[ProductSearchState]):
                     price = item.get('price') or ''
                     url = item.get('url') or ''
                     retailer = item.get('retailer') or ''
+                    availability = item.get('availability') or ''
                     search_results.append({
                         "product_name": str(name),
                         "price": str(price),
                         "url": str(url),
                         "retailer": str(retailer),
+                        "availability": str(availability),
                         "timestamp": datetime.now().isoformat()
                     })
                 except Exception:

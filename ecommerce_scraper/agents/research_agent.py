@@ -4,6 +4,7 @@ from typing import List, Optional, Dict, Any
 from crewai import Agent, LLM
 from ..config.settings import settings
 from ..tools.perplexity_retailer_research_tool import PerplexityRetailerResearchTool
+from ..tools.perplexity_vendor_scoped_research_tool import PerplexityVendorScopedResearchTool
 from ..schemas.agent_outputs import ResearchResult
 from ..ai_logging.error_logger import get_error_logger
 
@@ -15,7 +16,8 @@ class ResearchAgent:
         """Initialize the research agent with Perplexity research tool."""
         # Create Perplexity retailer research tool
         perplexity_tool = PerplexityRetailerResearchTool()
-        tools = [perplexity_tool]
+        vendor_scoped_tool = PerplexityVendorScopedResearchTool()
+        tools = [perplexity_tool, vendor_scoped_tool]
         self.error_logger = get_error_logger("research_agent")
         
         agent_config = {
@@ -82,7 +84,8 @@ class ResearchAgent:
 
     def create_retailer_research_task(self,
                                     product_query: str,
-                                    max_retailers: int = 5):
+                                    max_retailers: int = 5,
+                                    backfill_attempt: int = 1):
         """Create a task for researching UK retailers that sell a specific product."""
         from crewai import Task
 
@@ -97,7 +100,9 @@ class ResearchAgent:
         2. **Call the tool with these exact parameters:**
            - product_query: "{product_query}"
            - max_retailers: {max_retailers}
+           - backfill_attempt: {backfill_attempt}
            - search_instructions: (optional, for enhanced searches)
+            
         3. **Focus on finding legitimate UK retailers that sell products directly**
         4. **Exclude price comparison sites and affiliate marketing sites**
         5. **Prioritize UK retailers.**
@@ -130,6 +135,8 @@ class ResearchAgent:
                   "vendor": "Retailer Name",
                   "url": "direct product URL",
                   "price": "£XX.XX",
+                  "availability": "In stock",
+                  "priority": false,
                   "notes": "optional notes"
                 }}
               ],
@@ -151,8 +158,9 @@ class ResearchAgent:
                                              validation_feedback: Dict[str, Any],
                                              attempt_number: int = 1,
                                              max_retailers: int = 5,
-                                             exclude_urls: Optional[List[str]] = None,
-                                             exclude_domains: Optional[List[str]] = None):
+                                              exclude_urls: Optional[List[str]] = None,
+                                              exclude_domains: Optional[List[str]] = None,
+                                              backfill_attempt: int = 1):
         """Create a task for feedback-enhanced retailer research based on validation feedback."""
         from crewai import Task
 
@@ -239,6 +247,7 @@ class ResearchAgent:
         - search_instructions: [the enhanced instructions built from feedback above]
         - exclude_urls: [exact URLs to exclude]
         - exclude_domains: [domains to exclude]
+        - backfill_attempt: {backfill_attempt}
 
         IMPORTANT: If the validation feedback includes a list of already searched retailers/domains, exclude those from the new search. Do not return duplicates.
 
@@ -260,6 +269,8 @@ class ResearchAgent:
                   "vendor": "Improved Retailer Name",
                   "url": "direct product URL (verified)",
                   "price": "£XX.XX",
+                  "availability": "In stock",
+                  "priority": false,
                   "notes": "Why this retailer is better than previous attempts"
                 }}
               ],

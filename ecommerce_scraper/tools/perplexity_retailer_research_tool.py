@@ -39,6 +39,7 @@ class RetailerResearchInput(BaseModel):
     search_instructions: Optional[str] = Field(None, description="Optional enhanced search instructions based on feedback (e.g., 'Focus on major UK supermarkets, avoid price comparison sites')")
     exclude_urls: List[str] = Field(default_factory=list, description="Exact product URLs that must be excluded from results")
     exclude_domains: List[str] = Field(default_factory=list, description="Retailer domains that must be excluded from results (e.g., 'example.com')")
+    backfill_attempt: int = Field(1, description="Backfill attempt counter from flow")
     
     
 
@@ -103,6 +104,7 @@ class PerplexityRetailerResearchTool(BaseTool):
         search_instructions: Optional[str] = None,
         exclude_urls: Optional[List[str]] = None,
         exclude_domains: Optional[List[str]] = None,
+        backfill_attempt: int = 1,
     ) -> str:
         """
         Research UK retailers that sell the specified product.
@@ -126,11 +128,12 @@ class PerplexityRetailerResearchTool(BaseTool):
 
             # 1) Iterative research across priority vendors first
             # Skip this step when feedback-enhanced retries are in effect
-            # (indicated by non-empty search_instructions), to avoid re-checking the same vendors.
+            # (indicated by non-empty search_instructions), or when this is a backfill pass (>1),
+            # to avoid re-checking the same vendors.
             collected: List[Dict[str, Any]] = []
             seen_urls: set[str] = set(exclude_urls or [])
             excluded_domains: set[str] = set(exclude_domains or [])
-            if self._priority_vendors and not search_instructions:
+            if self._priority_vendors and not search_instructions and int(backfill_attempt or 1) <= 1:
                 # Run priority vendor checks concurrently for speed
                 max_workers = min(self._priority_max_concurrency, len(self._priority_vendors))
                 if max_workers <= 0:
@@ -312,12 +315,13 @@ Domains to exclude:
         - Place items without price information at the end of the list.
 
         OUTPUT FORMAT:
-        Return a JSON array of objects like this:
+        Return a JSON array of objects like this (ensure availability is either "In stock" or "Out of stock"):
         [
             {{
                 "vendor": "Retailer Name",
                 "url": "https://example.co.uk/product-page",
                 "price": "£xx.xx",
+                "availability": "In stock",
                 "notes": "Additional notes"
             }}
         ]
@@ -334,6 +338,7 @@ Domains to exclude:
             prompt = default_prompt
 
         return prompt
+ 
 
     # --------------------- Priority Vendors Helpers ---------------------
     def _load_priority_vendors(self) -> None:
@@ -408,6 +413,10 @@ REQUIREMENTS:
 - If the vendor does not sell it or no direct URL exists, return null (the literal JSON null).
 - The URL must start with http and belong to this vendor domain{' (' + vendor_domain + ')' if vendor_domain else ''}.
 - Prefer current, in-stock listings for UK customers.
+
+SEARCH TIPS:
+- You may use closely related keywords, alternate spellings, spacing/punctuation variants, and synonymous naming for the product when searching this vendor's site.
+- Avoid different pack sizes or clearly different variants that do not reasonably match the request.
 
 OUTPUT:
 - If found: a single JSON object
@@ -486,7 +495,7 @@ OUTPUT:
                 "top_p": 0.9,
             }
             if enforce_schema:
-                # Enforce JSON array of {vendor,url,price?}
+                # Enforce JSON array of {vendor,url,price?,availability?}
                 payload["response_format"] = {
                     "type": "json_schema",
                     "json_schema": {
@@ -498,6 +507,7 @@ OUTPUT:
                                     "vendor": {"type": "string", "minLength": 2},
                                     "url": {"type": "string", "pattern": "^https?://"},
                                     "price": {"type": "string"},
+                                    "availability": {"type": "string"},
                                     "priority": {"type": "boolean"},
                                     "notes": {"type": "string"},
                                     

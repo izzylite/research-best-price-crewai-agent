@@ -100,14 +100,37 @@ class AgentCapabilitiesReferenceTool(BaseTool):
                         "max_retailers": "Maximum number of retailers to find",
                         "search_instructions": "Enhanced search instructions based on feedback",
                         "exclude_urls": "List of exact product URLs to exclude from results",
-                        "exclude_domains": "List of retailer domains to exclude (e.g., 'example.com')"
+                        "exclude_domains": "List of retailer domains to exclude (e.g., 'example.com')",
+                        "vendor_name": "Optional vendor to scope search (feedback retries)",
+                        "vendor_url": "Optional vendor base URL/domain to constrain site",
+                        "keywords": "Optional related keywords to match variants within the vendor site",
+                        "amount": "Optional number of vendor-scoped results (capped by max_retailers)"
                     },
                     "capabilities": [
                         "Research UK retailers for specific products",
                         "Find direct product URLs",
                         "Get pricing information",
                         "Apply feedback-enhanced search strategies",
+                        "Vendor-scoped search: find up to N matching products within a specific vendor site using provided keywords",
                         "Honor explicit URL/domain exclusions with defensive post-filtering"
+                    ]
+                }
+                ,
+                "perplexity_vendor_scoped_research_tool": {
+                    "description": "Search within a specific vendor site using related keywords and return direct product-page URLs.",
+                    "parameters": {
+                        "product_query": "Product to find",
+                        "vendor_name": "Vendor/Retailer name",
+                        "vendor_url": "Vendor base URL/domain (optional but recommended)",
+                        "keywords": "Related keywords or list of keywords",
+                        "amount": "How many results to return (cap externally if needed)",
+                        "exclude_urls": "Exact URLs to exclude"
+                    },
+                    "capabilities": [
+                        "Vendor-scoped research using Perplexity",
+                        "Find direct product URLs on a single site",
+                        "Allow closely related keywords and minor naming variants",
+                        "Return results compatible with research flow"
                     ]
                 }
             },

@@ -167,18 +167,18 @@ def get_search_options() -> Dict[str, Any]:
     # Maximum retailers to search
     max_retailers = Prompt.ask(
         "[bold]Maximum number of retailers to search[/bold]",
-        default="5",
+        default="6",
         show_default=True
     )
     
     try:
         max_retailers = int(max_retailers)
         if max_retailers < 1 or max_retailers > 20:
-            console.print("[yellow]⚠️ Using default value of 5 retailers[/yellow]")
-            max_retailers = 5
+            console.print("[yellow]⚠️ Using default value of 6 retailers[/yellow]")
+            max_retailers = 6
     except ValueError:
-        console.print("[yellow]⚠️ Invalid input, using default value of 5 retailers[/yellow]")
-        max_retailers = 5
+        console.print("[yellow]⚠️ Invalid input, using default value of 6 retailers[/yellow]")
+        max_retailers = 6
     
     # Maximum retry attempts
     max_retries = Prompt.ask(
@@ -472,6 +472,7 @@ def display_search_results(result: ProductSearchResult):
     table.add_column("Retailer", style="cyan", no_wrap=True, width=15)
     table.add_column("Product Name", style="green", width=30)
     table.add_column("Price", style="yellow", no_wrap=True, width=10)
+    table.add_column("Availability", style="white", no_wrap=True, width=14)
     table.add_column("URL", style="blue", width=40)
 
     def to_dict(item: Any) -> Dict[str, Any]:
@@ -498,6 +499,7 @@ def display_search_results(result: ProductSearchResult):
             pdata.get('retailer', 'Unknown'),
             pdata.get('product_name', 'N/A'),
             pdata.get('price', 'N/A'),
+            pdata.get('availability', 'Unknown') or 'Unknown',
             display_url,
         )
 
